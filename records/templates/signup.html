@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Ident | Queue IO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    
+    <style>
+        /* This ensures the password list looks exactly like the other helper text */
+        .help-box ul {
+            list-style: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            display: inline;
+        }
+        .help-box li {
+            display: block;
+            margin-bottom: 2px;
+        }
+        /* Optional: Add a small bullet prefix that matches the terminal vibe */
+        .help-box li::before {
+            content: "• ";
+            color: #6366f1; /* indigo-500 */
+            margin-right: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 h-screen flex items-center justify-center font-sans">
+
+    <div class="w-full max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl">
+        <div class="text-center mb-8">
+            <h1 class="text-white text-2xl font-black uppercase tracking-tighter">New <span class="text-indigo-400">Ident</span></h1>
+            <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-widest font-mono">Create Security Credentials</p>
+        </div>
+
+        <form method="post" class="space-y-4">
+            {% csrf_token %}
+            
+            {% for field in form %}
+            <div class="space-y-1">
+                <label class="text-slate-400 text-[10px] font-bold uppercase block tracking-wider">
+                    {{ field.label }}
+                </label>
+                
+                {{ field }}
+
+                {% if field.errors %}
+                    {% for error in field.errors %}
+                        <p class="text-red-400 text-[9px] font-mono uppercase mt-1">
+                            <i class="fa-solid fa-triangle-exclamation mr-1"></i> {{ error }}
+                        </p>
+                    {% endfor %}
+                {% endif %}
+
+                {% if field.help_text %}
+                <div class="bg-slate-800/50 p-3 rounded-lg border border-slate-800 mt-2 help-box">
+                    <div class="text-slate-500 text-[9px] leading-relaxed font-mono flex items-start">
+                        <i class="fa-solid fa-info-circle mt-0.5 mr-2 text-indigo-500"></i>
+                        <div class="flex-1">
+                            {{ field.help_text|safe }}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg mt-6 transition-all uppercase tracking-widest text-sm shadow-lg shadow-indigo-500/20">
+                Confirm Registration
+            </button>
+        </form>
+
+        <p class="text-center mt-6">
+            <a href="{% url 'login' %}" class="text-slate-500 hover:text-white text-[10px] uppercase font-bold transition-colors">
+                Back to Terminal
+            </a>
+        </p>
+    </div>
+
+    <script>
+        // Apply Tailwind classes to all auto-generated Django inputs
+        document.querySelectorAll('input').forEach(input => {
+            if (input.type !== 'hidden') {
+                input.className = "w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all";
+            }
+        });
+    </script>
+
+</body>
+</html>

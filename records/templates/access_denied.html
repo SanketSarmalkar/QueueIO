@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <title>Access Denied | Queue IO</title>
+</head>
+<body class="bg-slate-950 h-screen flex items-center justify-center font-sans">
+    <div class="text-center p-12 border border-red-900/50 bg-red-950/10 rounded-2xl max-w-lg">
+        <i class="fa-solid fa-user-slash text-red-500 text-5xl mb-6"></i>
+        <h1 class="text-white text-2xl font-black uppercase tracking-tighter mb-4">
+            Security <span class="text-red-500">Block</span>
+        </h1>
+        <p class="text-slate-400 text-sm font-mono leading-relaxed mb-8 uppercase tracking-wide">
+            Your identity has been verified, but your clearance level is currently <span class="text-red-400">UNASSIGNED</span>. 
+            Contact a System Supervisor to authorize your terminal access.
+        </p>
+        <a href="{% url 'logout' %}" class="text-slate-500 hover:text-white text-xs font-bold uppercase tracking-widest border-b border-slate-800 pb-1 transition-all">
+            Exit Terminal
+        </a>
+    </div>
+</body>
+</html>

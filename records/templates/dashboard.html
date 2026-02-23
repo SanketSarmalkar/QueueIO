@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en" x-data="{ 
+    darkMode: localStorage.getItem('darkMode') === 'true',
+    sidebarOpen: true,
+    selectedId: '{{ latest_id }}',
+    searchQuery: '',
+    items: JSON.parse(document.getElementById('items-data').textContent),
+    toggleDark() {
+        this.darkMode = !this.darkMode;
+        localStorage.setItem('darkMode', this.darkMode);
+    },
+    get filteredItems() {
+        return this.items.filter(i => 
+            i.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+            i.category.toLowerCase().includes(this.searchQuery.toLowerCase())
+        )
+    },
+    get activeItem() { return this.items.find(i => i.id === this.selectedId) }
+}" :class="{ 'dark': darkMode }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Queuei Intelligence Terminal</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/typography@0.5.10/dist/typography.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; }
+        
+        .prose { max-width: none; }
+        .prose h3 { margin-top: 1.5rem; font-weight: 800; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; }
+        .dark .prose h3 { border-color: #1e293b; color: #f8fafc; }
+        .prose strong { color: #4f46e5; }
+        .dark .prose strong { color: #818cf8; }
+        
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+
+{{ items_raw|json_script:"items-data" }}
+
+<body class="bg-slate-50 dark:bg-slate-950 h-screen overflow-hidden flex flex-col font-sans transition-colors duration-300">
+
+    <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between shadow-lg z-50 border-b border-slate-800 shrink-0">
+        <div class="flex items-center gap-2 md:gap-3">
+            <button @click="sidebarOpen = !sidebarOpen" class="p-2 -ml-2 text-slate-400 hover:text-white transition-all">
+                <i class="fa-solid fa-bars-staggered text-lg" :class="!sidebarOpen && 'rotate-180'"></i>
+            </button>
+            
+            <div class="bg-indigo-500 p-1.5 rounded"><i class="fa-solid fa-satellite"></i></div>
+            <span class="font-black tracking-tighter text-lg uppercase">Queue <span class="text-indigo-400">IO</span></span>
+        </div>
+
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400">
+                <span class="flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full animate-pulse" :class="darkMode ? 'bg-indigo-400' : 'bg-green-500'"></span> 
+                    SYSTEM LIVE
+                </span>
+                <span class="uppercase">{% now "d M Y" %}</span>
+            </div>
+
+            <button @click="toggleDark()" class="p-2 rounded-full hover:bg-slate-800 transition-colors text-slate-400 hover:text-indigo-400">
+                <i class="fa-solid" :class="darkMode ? 'fa-sun' : 'fa-moon'"></i>
+            </button>
+
+            <a href="{% url 'logout' %}" class="flex items-center gap-2 text-slate-400 hover:text-red-400 transition-colors text-[10px] font-mono uppercase border-l border-slate-700 pl-6">
+                <i class="fa-solid fa-power-off"></i> Logout
+            </a>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden relative">
+        
+        <aside 
+            x-show="sidebarOpen"
+            x-transition:enter="transition ease-out duration-300"
+            x-transition:enter-start="-ml-80"
+            x-transition:enter-end="ml-0"
+            x-transition:leave="transition ease-in duration-300"
+            x-transition:leave-start="ml-0"
+            x-transition:leave-end="-ml-80"
+            class="w-80 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 transition-colors duration-300 z-20"
+        >
+            <div class="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                <div class="relative">
+                    <i class="fa-solid fa-search absolute left-3 top-3 text-slate-400 text-xs"></i>
+                    <input type="text" x-model="searchQuery" placeholder="Search archive..." 
+                           class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-4 text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto custom-scrollbar">
+                <template x-for="item in filteredItems" :key="item.id">
+                    <div @click="selectedId = item.id"
+                         :class="selectedId === item.id 
+                            ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600') 
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'"
+                         class="p-4 cursor-pointer border-b border-slate-50 dark:border-slate-800 transition-all duration-200 group">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-[9px] font-bold px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded uppercase" x-text="item.category"></span>
+                            <span class="text-[10px] text-slate-400 font-mono" x-text="item.date_display"></span>
+                        </div>
+                        <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-400 leading-snug line-clamp-2" x-text="item.title"></h4>
+                    </div>
+                </template>
+            </div>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto bg-white dark:bg-slate-950 custom-scrollbar relative transition-colors duration-300">
+            <template x-if="activeItem">
+                <div class="max-w-4xl mx-auto p-12 animate-in fade-in duration-500">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="text-indigo-600 dark:text-indigo-400 font-black text-xs tracking-widest uppercase" x-text="activeItem.category"></span>
+                        <span class="text-slate-300 dark:text-slate-700">/</span>
+                        <span class="text-slate-500 dark:text-slate-500 text-xs font-mono" x-text="'REF: ' + activeItem.key"></span>
+                    </div>
+
+                    <h1 class="text-4xl font-black text-slate-900 dark:text-white mb-8 leading-[1.1]" x-text="activeItem.title"></h1>
+                    
+                    <div class="h-1 w-20 bg-indigo-600 dark:bg-indigo-500 mb-12 rounded-full"></div>
+
+                    <article class="prose prose-slate dark:prose-invert lg:prose-lg prose-indigo">
+                        <div x-html="marked.parse(activeItem.value)" class="text-slate-700 dark:text-slate-300 selection:bg-indigo-100 dark:selection:bg-indigo-900">
+                        </div>
+                    </article>
+
+                    <div class="mt-20 pt-8 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 dark:text-slate-500 font-mono flex justify-between uppercase">
+                        <span>End of Report</span>
+                        <span x-text="'Logged on ' + activeItem.date_display"></span>
+                    </div>
+                </div>
+            </template>
+
+            <template x-if="!activeItem">
+                <div class="h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-800 gap-6">
+                    <i class="fa-solid fa-box-open text-6xl opacity-20"></i>
+                    <p class="text-sm font-mono tracking-widest uppercase">Select Archive Entry to Initialize</p>
+                </div>
+            </template>
+        </main>
+    </div>
+
+</body>
+</html>
