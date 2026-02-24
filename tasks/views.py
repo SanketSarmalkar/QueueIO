@@ -52,72 +52,101 @@ def fetch_video_metadata(url, ydl_instance, search_set):
         
     return None
 
-def get_videos_by_dates(playlist_url, target_dates_list):
-    search_set = set()
+# def get_videos_by_dates(playlist_url, target_dates_list):
+#     search_set = set()
     
-    for d in target_dates_list:
-        try:
-            formatted_date = datetime.strptime(d, '%Y-%m-%d').strftime('%Y%m%d')
-            search_set.add(formatted_date)
-        except ValueError:
-            print(f"Skipping invalid date format: {d}. Use YYYY-MM-DD.")
+#     for d in target_dates_list:
+#         try:
+#             formatted_date = datetime.strptime(d, '%Y-%m-%d').strftime('%Y%m%d')
+#             search_set.add(formatted_date)
+#         except ValueError:
+#             print(f"Skipping invalid date format: {d}. Use YYYY-MM-DD.")
 
-    if not search_set:
-        print("No valid dates to search for.")
-        return []
+#     if not search_set:
+#         print("No valid dates to search for.")
+#         return []
 
-    print(f"Searching for videos from these dates: {', '.join(target_dates_list)}...")
-    playlist_opts = {
-        'extract_flat': 'in_playlist',
-        'quiet': True,
-        'no_warnings': True,
-        'logger': Silencer(),
-        'ignoreerrors': True,
-    }
+#     print(f"Searching for videos from these dates: {', '.join(target_dates_list)}...")
+#     playlist_opts = {
+#         'extract_flat': 'in_playlist',
+#         'quiet': True,
+#         'no_warnings': True,
+#         'logger': Silencer(),
+#         'ignoreerrors': True,
+#     }
 
-    video_urls = []
-    with yt_dlp.YoutubeDL(playlist_opts) as ydl:
-        playlist_info = ydl.extract_info(playlist_url, download=False)
+#     video_urls = []
+#     with yt_dlp.YoutubeDL(playlist_opts) as ydl:
+#         playlist_info = ydl.extract_info(playlist_url, download=False)
         
-        if playlist_info and 'entries' in playlist_info:
-            for entry in playlist_info['entries']:
-                if entry and entry.get('url'):
-                    video_urls.append(entry.get('url'))
+#         if playlist_info and 'entries' in playlist_info:
+#             for entry in playlist_info['entries']:
+#                 if entry and entry.get('url'):
+#                     video_urls.append(entry.get('url'))
 
-    if not video_urls:
-        print("No videos found in the playlist.")
-        return []
+#     if not video_urls:
+#         print("No videos found in the playlist.")
+#         return []
 
-    print(f"Playlist map fetched. Checkingq {len(video_urls)} videos concurrently...")
-    target_urls = video_urls[0:10]
+#     print(f"Playlist map fetched. Checkingq {len(video_urls)} videos concurrently...")
+#     target_urls = video_urls[0:10]
 
+#     video_opts = {
+#         'extract_flat': False,
+#         'quiet': True,
+#         'no_warnings': True,
+#         'logger': Silencer(),
+#         'ignoreerrors': True,
+#     }
+
+#     found_videos = []
+    
+#     with yt_dlp.YoutubeDL(video_opts) as ydl:
+#         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+#             futures = [executor.submit(fetch_video_metadata, url, ydl, search_set) for url in target_urls]
+#             for future in concurrent.futures.as_completed(futures):
+#                 result = future.result()
+#                 if result:
+#                     found_videos.append(result)
+
+#     found_videos.sort(key=lambda x: x['date'])
+
+#     if found_videos:
+#         print(f"\n✅ Total Matches Found: {len(found_videos)}")
+#         for vid in found_videos:
+#             print(f"[{vid['date']}] - {vid['title']} (ID: {vid['id']})")
+#     else:
+#         print("No videos matched any of the provided dates.")
+            
+#     return found_videos
+
+def get_videos_by_dates(playlist_url, target_dates_list):
+    # Convert list to yt-dlp date format (YYYYMMDD)
+    # Note: Using a range is safer than specific dates
+    after = target_dates_list[0].replace('-', '')
+    
     video_opts = {
-        'extract_flat': False,
+        'extract_flat': True,
         'quiet': True,
-        'no_warnings': True,
-        'logger': Silencer(),
-        'ignoreerrors': True,
+        'playlist_items': '1-50', # Check first 50 instead of just 10
+        'daterange': yt_dlp.utils.DateRange(after), # Only fetch after this date
     }
 
     found_videos = []
-    
     with yt_dlp.YoutubeDL(video_opts) as ydl:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(fetch_video_metadata, url, ydl, search_set) for url in target_urls]
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                if result:
-                    found_videos.append(result)
-
-    found_videos.sort(key=lambda x: x['date'])
-
-    if found_videos:
-        print(f"\n✅ Total Matches Found: {len(found_videos)}")
-        for vid in found_videos:
-            print(f"[{vid['date']}] - {vid['title']} (ID: {vid['id']})")
-    else:
-        print("No videos matched any of the provided dates.")
-            
+        result = ydl.extract_info(playlist_url, download=False)
+        if 'entries' in result:
+            for entry in result['entries']:
+                # entry.get('upload_date') is usually available even in flat mode
+                v_date = entry.get('upload_date')
+                # if v_date in [d.replace('-', '') for d in target_dates_list]:
+                found_videos.append({
+                    'title': entry.get('title'),
+                    'id': entry.get('id'),
+                    'date': v_date,
+                    'url': f"https://www.youtube.com/watch?v={entry.get('id')}"
+                })
+    print(found_videos)
     return found_videos
 
 def generate_text(prompt):
