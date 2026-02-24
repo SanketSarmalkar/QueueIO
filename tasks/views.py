@@ -128,7 +128,7 @@ def get_videos_by_dates(playlist_url, target_dates_list):
     video_opts = {
         'extract_flat': True,
         'quiet': True,
-        'playlist_items': '1-50', # Check first 50 instead of just 10
+        'playlist_items': '1-10', # Check first 50 instead of just 10
         'daterange': yt_dlp.utils.DateRange(after), # Only fetch after this date
     }
 
