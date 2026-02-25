@@ -3,5 +3,6 @@ from django.contrib.auth import views as auth_views
 from . import views
 
 urlpatterns = [
-    path('queuei/', views.run_task, name='queuei'),
+    path('queuei/<str:task_key>/', views.run_task, name='run_generic_task'),
+    path('alert/', views.slack_alert, name='slack_alert'),
 ]

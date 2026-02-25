@@ -14,6 +14,7 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 import os
+import sys
 
 load_dotenv()
 
@@ -138,3 +139,18 @@ STATIC_URL = 'static/'
 
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False, # Important: Don't kill default loggers
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'stream': sys.stdout, # Force logs to stdout
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}
