@@ -20,4 +20,5 @@ from django.urls import path, include
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('records.urls')), # Points root URL to our records app
+    path('tasks/', include('tasks.urls')), # Points /tasks/ URL to our tasks app
 ]

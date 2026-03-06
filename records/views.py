@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth import login
 from django.contrib import messages
+from datetime import datetime
 import json
 
 @login_required
@@ -25,13 +26,23 @@ def dashboard(request):
     
     formatted_items = []
     for item in records:
+        created_at = item.get('createdat')
+        date_display = "N/A"
+        if created_at:
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at)
+            if hasattr(created_at, "strftime"):
+                date_display = created_at.strftime("%b %d, %Y")
+            if hasattr(created_at, "strftime"):
+                time_display = created_at.strftime('%I:%M %p')
         formatted_items.append({
             'id': str(item['_id']),
             'category': item.get('category', 'queuei'),
             'key': item.get('key', ''),
             'title': item.get('a', 'Untitled Record').split('|')[0].strip(),
             'value': item.get('value', ''),
-            'date_display': item.get('createdat').strftime("%b %d, %Y") if item.get('createdat') else "N/A"
+            'date_display': date_display,
+            'time_display': time_display,
         })
         
     return render(request, 'dashboard.html', {
