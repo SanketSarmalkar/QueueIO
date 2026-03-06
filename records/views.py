@@ -33,13 +33,16 @@ def dashboard(request):
                 created_at = datetime.fromisoformat(created_at)
             if hasattr(created_at, "strftime"):
                 date_display = created_at.strftime("%b %d, %Y")
+            if hasattr(created_at, "strftime"):
+                time_display = created_at.strftime('%I:%M %p')
         formatted_items.append({
             'id': str(item['_id']),
             'category': item.get('category', 'queuei'),
             'key': item.get('key', ''),
             'title': item.get('a', 'Untitled Record').split('|')[0].strip(),
             'value': item.get('value', ''),
-            'date_display': date_display
+            'date_display': date_display,
+            'time_display': time_display,
         })
         
     return render(request, 'dashboard.html', {

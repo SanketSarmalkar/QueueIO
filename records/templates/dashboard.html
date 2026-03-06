@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en" x-data="{ 
     darkMode: localStorage.getItem('darkMode') === 'true',
@@ -21,6 +22,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Queuei Intelligence Terminal</title>
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -58,7 +60,10 @@
                 <i class="fa-solid fa-bars-staggered text-lg" :class="!sidebarOpen && 'rotate-180'"></i>
             </button>
             
-            <div class="bg-indigo-500 p-1.5 rounded"><i class="fa-solid fa-satellite"></i></div>
+            <div class="bg-indigo-500 p-1.5 rounded">
+                {% comment %} <i class="fa-solid fa-satellite"></i> {% endcomment %}
+                <img src="{% static 'favicon.png' %}" alt="Logo" class="w-5 h-5">
+            </div>
             <span class="font-black tracking-tighter text-lg uppercase">Queue <span class="text-indigo-400">IO</span></span>
         </div>
 
@@ -108,9 +113,12 @@
                             ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600') 
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'"
                          class="p-4 cursor-pointer border-b border-slate-50 dark:border-slate-800 transition-all duration-200 group">
-                        <div class="flex justify-between items-center mb-1">
-                            <span class="text-[9px] font-bold px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded uppercase" x-text="item.category"></span>
-                            <span class="text-[10px] text-slate-400 font-mono" x-text="item.date_display"></span>
+                         <div class="flex justify-between items-start mb-1">
+                            <span class="text-[9px] font-bold px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded uppercase mt-0.5" x-text="item.category"></span>
+                            <div class="flex flex-col items-end">
+                                <span class="text-[10px] text-slate-400 font-mono" x-text="item.date_display"></span>
+                                <span class="text-[9px] text-slate-300 dark:text-slate-500 font-mono" x-text="item.time_display"></span>
+                            </div>
                         </div>
                         <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-400 leading-snug line-clamp-2" x-text="item.title"></h4>
                     </div>
