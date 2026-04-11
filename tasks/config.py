@@ -65,3 +65,7 @@ EXECUTOR_WORKERS = int(os.getenv('EXECUTOR_WORKERS', '1'))
 INBETWEEN_TASK_SLEEP = int(os.getenv('INBETWEEN_TASK_SLEEP', '15'))
 
 SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL', '')
+
+RAPID_API_KEY = os.getenv('RAPID_API_KEY', '')
+RAPID_API_HOST = os.getenv('RAPID_API_HOST', '')
+RAPID_API_URL = os.getenv('RAPID_API_URL', '')

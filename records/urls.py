@@ -7,4 +7,5 @@ urlpatterns = [
     path('logout/', views.logout_view, name='logout'),
     path('signup/', views.signup_view, name='signup'),
     path('', views.dashboard, name='dashboard'),
+    path('intel-chat/', views.intel_chat_view, name='intel_chat'),
 ]

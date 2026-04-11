@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cross-Intel Chat | Queue IO</title>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0B0F19] text-white font-sans">
+
+<div x-data="{ 
+    query: '', 
+    loading: false, 
+    messages: [], 
+    async sendQuery() {
+        if (!this.query.trim() || this.loading) return;
+        this.loading = true;
+        
+        const userMsg = this.query;
+        this.messages.push({ role: 'user', text: userMsg });
+        this.query = '';
+
+        try {
+            const response = await fetch('{% url 'intel_chat' %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({ query: userMsg })
+            });
+            const data = await response.json();
+            this.messages.push({ 
+                role: 'ai', 
+                text: marked.parse(data.answer), 
+                sources: data.sources 
+            });
+        } catch (e) {
+            this.messages.push({ role: 'ai', text: 'ERROR: Uplink interrupted.' });
+        } finally {
+            this.loading = false;
+            this.$nextTick(() => { this.$refs.scrollArea.scrollTop = this.$refs.scrollArea.scrollHeight });
+        }
+    }
+}" class="flex flex-col h-screen">
+
+    <div class="p-6 border-b border-gray-800 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold tracking-tight uppercase">Cross-Intel Chat</h1>
+            <p class="text-gray-400 text-xs mt-1">Direct query access to the 3072-dim Intelligence Archive.</p>
+        </div>
+        <a href="/" class="text-xs text-indigo-400 hover:text-white transition">← BACK TO STACKS</a>
+    </div>
+
+    <div x-ref="scrollArea" class="flex-1 overflow-y-auto p-6 space-y-6">
+        <template x-for="(msg, index) in messages" :key="index">
+            <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
+                <div :class="msg.role === 'user' 
+                    ? 'bg-indigo-600 text-white rounded-t-xl rounded-bl-xl' 
+                    : 'bg-[#161B29] border border-gray-800 text-gray-200 rounded-t-xl rounded-br-xl'"
+                    class="max-w-[80%] p-4 shadow-xl">
+                    
+                    <div class="text-sm leading-relaxed markdown-content" x-html="msg.text"></div>
+
+                    <template x-if="msg.sources && msg.sources.length > 0">
+                        <div class="mt-4 pt-3 border-t border-gray-700">
+                            <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Sources</p>
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="src in msg.sources">
+                                    <span class="bg-black/40 px-2 py-1 rounded text-[10px] text-indigo-400 border border-indigo-500/30"
+                                          x-text="src.title"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <div x-show="loading" class="flex items-center space-x-2 text-indigo-400">
+            <div class="animate-bounce">●</div>
+            <div class="animate-bounce [animation-delay:0.2s]">●</div>
+            <div class="animate-bounce [animation-delay:0.4s]">●</div>
+        </div>
+    </div>
+
+    <div class="p-6 border-t border-gray-800">
+        <div class="relative max-w-4xl mx-auto">
+            <input 
+                type="text" 
+                x-model="query" 
+                @keyup.enter.prevent="sendQuery()"
+                placeholder="Ask about geopolitics, trade, or security..."
+                class="w-full bg-[#161B29] border border-gray-700 rounded-xl py-4 pl-6 pr-16 text-white focus:outline-none focus:border-indigo-500 transition-all shadow-2xl"
+            >
+            <button @click="sendQuery()" class="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-500 hover:text-white">
+                SEND
+            </button>
+        </div>
+    </div>
+</div>
+</body>
+</html>
