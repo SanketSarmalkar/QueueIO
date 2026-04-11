@@ -147,6 +147,27 @@ class YouTubeLLMPipeline:
         except Exception as e:
             logging.error(f"LLM action failed: {e}")
             return None
+        
+    def generate_embedding(self, text):
+        """
+        Generates a 3072-dimension vector.
+        Optimized for Python 3.14 using the 'Simplified Batch' logic.
+        """
+        try:
+            # We use the list format [text] to prevent NoneType response errors
+            result = self.genai_client.models.embed_content(
+                model=self.embedding_model,
+                contents=[text]
+            )
+            
+            # Extract values from the first item in the embeddings list
+            if result and result.embeddings:
+                return result.embeddings[0].values
+                
+            return None
+        except Exception as e:
+            logging.error(f"Intelligence Vectorization failed: {e}")
+            return None
 
     def save_to_mongo(self, video, llm_result):
         """Generic insertion logic."""
@@ -161,6 +182,10 @@ class YouTubeLLMPipeline:
                 temp_doc['createdat'] = v_date if v_date else datetime.now(timezone.utc)
             else:
                 temp_doc[db_key] = video.get(source_key, None)
+
+        embedding = self.generate_embedding(llm_result)
+        if embedding:
+            temp_doc['embedding'] = embedding
         try:
             result = self.collection.insert_one(temp_doc)
             logging.info(f"Document inserted with ID: {result.inserted_id} for video ID {video.get('id')}")
@@ -185,7 +210,7 @@ class YouTubeLLMPipeline:
         self.processed_video_ids.add(mongo_insert)
         logging.info(f"Processed and saved video ID {video['id']} with title '{video['title']}'")
 
-    def fetch_content_metadata(self, url, custom_opts=None):
+    def fetch_content_metadata(self, url, playlist_id=None, custom_opts=None):
         """
         A generic wrapper for yt-dlp that extracts entries 
         based on a passed configuration.
@@ -204,6 +229,7 @@ class YouTubeLLMPipeline:
             try:
                 result = ydl.extract_info(url, download=False)
                 entries = result.get('entries', [result]) 
+                playlist_name = result.get('title', 'General Archive')
                 for entry in entries:
                     if not entry: continue
 
@@ -211,6 +237,8 @@ class YouTubeLLMPipeline:
                         'id': entry.get('id'),
                         'title': entry.get('title'),
                         'date': entry.get('upload_date'),
+                        'playlist_id': playlist_id,
+                        'playlist_title': playlist_name,
                         'url': entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
                     })
             except Exception as e:
@@ -224,7 +252,7 @@ class YouTubeLLMPipeline:
             if not playlist_id.strip():
                 continue
             playlist_url = self.playlist_url_template.format(playlist_id=playlist_id)
-            videos = self.fetch_content_metadata(playlist_url)
+            videos = self.fetch_content_metadata(playlist_url, playlist_id=playlist_id)
             all_videos.extend(videos)
         return all_videos
     

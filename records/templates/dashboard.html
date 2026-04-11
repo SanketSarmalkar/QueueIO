@@ -3,18 +3,89 @@
 <html lang="en" x-data="{ 
     darkMode: localStorage.getItem('darkMode') === 'true',
     sidebarOpen: true,
+    viewMode: 'stacks', // New: 'stacks' or 'entries'
+    selectedPlaylistId: null, // New
     selectedId: '{{ latest_id }}',
     searchQuery: '',
+    chatQuery: '',
+    chatLoading: false,
+    chatMessages: [],
     items: JSON.parse(document.getElementById('items-data').textContent),
     toggleDark() {
         this.darkMode = !this.darkMode;
         localStorage.setItem('darkMode', this.darkMode);
     },
+    // Grouping Logic: Create unique stacks based on playlist_id
+    get playlistStacks() {
+        const groups = {};
+        this.items.forEach(item => {
+            const pid = item.playlist_id || 'unassigned';
+            if (!groups[pid]) {
+                groups[pid] = { 
+                    id: pid, 
+                    count: 0, 
+                    latestDate: item.date_display,
+                    title: item.playlist_title || 'General Archive', // Assumes you pass playlist title
+                    display_name: pid === 'unassigned' ? 'General Archive' : pid
+                };
+            }
+            groups[pid].count++;
+        });
+        return Object.values(groups);
+    },
+    // Filtered Items: Now filters by BOTH search and selected playlist
     get filteredItems() {
-        return this.items.filter(i => 
-            i.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-            i.category.toLowerCase().includes(this.searchQuery.toLowerCase())
-        )
+        return this.items.filter(i => {
+            const matchesSearch = i.title.toLowerCase().includes(this.searchQuery.toLowerCase());
+            const itemPid = i.playlist_id || 'unassigned';
+            const matchesPlaylist = this.selectedPlaylistId ? (itemPid === this.selectedPlaylistId) : true;
+            return matchesSearch && matchesPlaylist;
+        })
+    },
+    openStack(id) {
+        this.selectedPlaylistId = id;
+        this.viewMode = 'entries';
+        // Auto-select the first item in the stack
+        const firstInStack = this.items.find(i => i.playlist_id === id);
+        if (firstInStack) this.selectedId = firstInStack.id;
+    },
+    goBackToStacks() {
+        this.viewMode = 'stacks';
+        this.selectedPlaylistId = null;
+    },
+    async sendChatQuery() {
+        if (!this.chatQuery.trim() || this.chatLoading) return;
+        this.chatLoading = true;
+        
+        const userMsg = this.chatQuery;
+        this.chatMessages.push({ role: 'user', text: userMsg });
+        this.chatQuery = '';
+
+        try {
+            const response = await fetch('/intel-chat/', { // Ensure this matches your urls.py
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({ query: userMsg })
+            });
+            const data = await response.json();
+            this.chatMessages.push({ 
+                role: 'ai', 
+                text: marked.parse(data.answer), 
+                sources: data.sources 
+            });
+        } catch (e) {
+            this.chatMessages.push({ role: 'ai', text: 'SYSTEM ERROR: Intelligence uplink failed.' });
+        } finally {
+            this.chatLoading = false;
+            // Auto-scroll logic
+            this.$nextTick(() => { 
+                const el = document.getElementById('chat-scroll');
+                if (el) el.scrollTop = el.scrollHeight;
+            });
+        }
     },
     get activeItem() { return this.items.find(i => i.id === this.selectedId) }
 }" :class="{ 'dark': darkMode }">
@@ -60,9 +131,10 @@
                 <i class="fa-solid fa-bars-staggered text-lg" :class="!sidebarOpen && 'rotate-180'"></i>
             </button>
             
-            <div class="bg-indigo-500 p-1.5 rounded">
-                {% comment %} <i class="fa-solid fa-satellite"></i> {% endcomment %}
-                <img src="{% static 'favicon.png' %}" alt="Logo" class="w-5 h-5">
+            <div class="flex items-center gap-2 md:gap-3 cursor-pointer" @click="goBackToStacks()">
+                <img src="{% static 'favicon.png' %}" 
+                        alt="Logo" 
+                        class="w-9 h-9 rounded-lg object-cover shadow-sm border border-slate-700/50">
             </div>
             <span class="font-black tracking-tighter text-lg uppercase">Queue <span class="text-indigo-400">IO</span></span>
         </div>
@@ -75,6 +147,19 @@
                 </span>
                 <span class="uppercase">{% now "d M Y" %}</span>
             </div>
+
+            <nav class="hidden md:flex items-center ml-8 gap-1">
+                <button @click="viewMode = 'stacks'" 
+                        :class="viewMode === 'stacks' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white'"
+                        class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
+                    Stacks
+                </button>
+                <button @click="viewMode = 'chat'" 
+                        :class="viewMode === 'chat' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white'"
+                        class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
+                    Intel Chat
+                </button>
+            </nav>
 
             <button @click="toggleDark()" class="p-2 rounded-full hover:bg-slate-800 transition-colors text-slate-400 hover:text-indigo-400">
                 <i class="fa-solid" :class="darkMode ? 'fa-sun' : 'fa-moon'"></i>
@@ -89,7 +174,7 @@
     <div class="flex flex-1 overflow-hidden relative">
         
         <aside 
-            x-show="sidebarOpen"
+            x-show="sidebarOpen && viewMode === 'entries'"
             x-transition:enter="transition ease-out duration-300"
             x-transition:enter-start="-ml-80"
             x-transition:enter-end="ml-0"
@@ -107,7 +192,7 @@
             </div>
             
             <div class="flex-1 overflow-y-auto custom-scrollbar">
-                <template x-for="item in filteredItems" :key="item.id">
+                <template x-for="item in filteredItems" :key="item.key">
                     <div @click="selectedId = item.id"
                          :class="selectedId === item.id 
                             ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600') 
@@ -127,26 +212,113 @@
         </aside>
 
         <main class="flex-1 overflow-y-auto bg-white dark:bg-slate-950 custom-scrollbar relative transition-colors duration-300">
-            <template x-if="activeItem">
-                <div class="max-w-4xl mx-auto p-12 animate-in fade-in duration-500">
-                    <div class="flex items-center gap-3 mb-4">
-                        <span class="text-indigo-600 dark:text-indigo-400 font-black text-xs tracking-widest uppercase" x-text="activeItem.category"></span>
-                        <span class="text-slate-300 dark:text-slate-700">/</span>
-                        <span class="text-slate-500 dark:text-slate-500 text-xs font-mono" x-text="'REF: ' + activeItem.key"></span>
-                    </div>
-
-                    <h1 class="text-4xl font-black text-slate-900 dark:text-white mb-8 leading-[1.1]" x-text="activeItem.title"></h1>
-                    
-                    <div class="h-1 w-20 bg-indigo-600 dark:bg-indigo-500 mb-12 rounded-full"></div>
-
-                    <article class="prose prose-slate dark:prose-invert lg:prose-lg prose-indigo">
-                        <div x-html="marked.parse(activeItem.value)" class="text-slate-700 dark:text-slate-300 selection:bg-indigo-100 dark:selection:bg-indigo-900">
+            <template x-if="viewMode === 'chat'">
+                <div class="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
+                    <div id="chat-scroll" class="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 custom-scrollbar">
+                        <template x-for="(msg, index) in chatMessages" :key="index">
+                            <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
+                                <div :class="msg.role === 'user' 
+                                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-indigo-500/10' 
+                                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none shadow-xl'"
+                                    class="max-w-[85%] p-5 md:p-7">
+                                    
+                                    <div class="prose prose-sm dark:prose-invert" x-html="msg.text"></div>
+            
+                                    <template x-if="msg.sources && msg.sources.length > 0">
+                                        <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+                                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Verified Intelligence Sources</p>
+                                            <div class="flex flex-wrap gap-2">
+                                                <template x-for="src in msg.sources">
+                                                    <span class="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded text-[9px] font-bold text-indigo-500 border border-indigo-500/20"
+                                                          x-text="src.title"></span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+            
+                        <div x-show="chatLoading" class="flex items-center gap-3 text-indigo-500 font-mono text-[10px] tracking-[0.2em]">
+                            <span class="relative flex h-2 w-2">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                            </span>
+                            ANALYZING ARCHIVE DATA...
                         </div>
-                    </article>
+                    </div>
+            
+                    <div class="p-6 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+                        <div class="max-w-4xl mx-auto relative group">
+                            <input 
+                                type="text" 
+                                x-model="chatQuery" 
+                                @keyup.enter.prevent="sendChatQuery()"
+                                placeholder="Query the 3072-dim Intelligence Archive..."
+                                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-6 pr-16 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-inner"
+                            >
+                            <button @click="sendChatQuery()" class="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-xl transition-colors">
+                                <i class="fa-solid fa-paper-plane text-xs"></i>
+                            </button>
+                        </div>
+                        <p class="text-center text-[9px] text-slate-400 mt-3 font-mono uppercase tracking-widest">Cross-Intel Synthesis Engine v1.0 // Secure Uplink Active</p>
+                    </div>
+                </div>
+            </template>
+            
+            <template x-if="viewMode === 'stacks'">
+                <div class="p-8 max-w-7xl mx-auto">
+                    <h2 class="text-2xl font-black text-slate-800 dark:text-white mb-8 uppercase tracking-tight">Intelligence Stacks</h2>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <template x-for="stack in playlistStacks" :key="stack.id">
+                            <div @click="openStack(stack.id)" 
+                                 class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 cursor-pointer hover:border-indigo-500 transition-all hover:shadow-2xl hover:-translate-y-1">
+                                
+                                <div class="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-4 group-hover:scale-110 transition-transform">
+                                    <i class="fa-solid fa-folder-tree text-xl"></i>
+                                </div>
+        
+                                <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200 mb-1" x-text="stack.title"></h3> 
+                                <div class="flex items-center justify-between mt-4">
+                                    <span class="text-[9px] font-mono text-slate-500 uppercase" x-text="'ID: ' + stack.id"></span>
+                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
+                                </div>
+                                <div class="flex items-center justify-between mt-4">
+                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
+                                    <span class="text-[10px] font-mono text-indigo-500 font-bold">OPEN STACK <i class="fa-solid fa-arrow-right ml-1"></i></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+            
+            <template x-if="viewMode === 'entries' && activeItem">
+                <div class="max-w-4xl mx-auto p-12 animate-in fade-in zoom-in duration-300">
+                    <button @click="goBackToStacks()" class="mb-6 text-[10px] font-bold text-indigo-500 uppercase flex items-center gap-2 hover:text-indigo-400">
+                        <i class="fa-solid fa-chevron-left"></i> Back to Stacks
+                    </button>
+                    <div class="max-w-4xl mx-auto p-12 animate-in fade-in duration-500">
+                        <div class="flex items-center gap-3 mb-4">
+                            <span class="text-indigo-600 dark:text-indigo-400 font-black text-xs tracking-widest uppercase" x-text="activeItem.category"></span>
+                            <span class="text-slate-300 dark:text-slate-700">/</span>
+                            <span class="text-slate-500 dark:text-slate-500 text-xs font-mono" x-text="'REF: ' + activeItem.key"></span>
+                        </div>
 
-                    <div class="mt-20 pt-8 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 dark:text-slate-500 font-mono flex justify-between uppercase">
-                        <span>End of Report</span>
-                        <span x-text="'Logged on ' + activeItem.date_display"></span>
+                        <h1 class="text-4xl font-black text-slate-900 dark:text-white mb-8 leading-[1.1]" x-text="activeItem.title"></h1>
+                        
+                        <div class="h-1 w-20 bg-indigo-600 dark:bg-indigo-500 mb-12 rounded-full"></div>
+
+                        <article class="prose prose-slate dark:prose-invert lg:prose-lg prose-indigo">
+                            <div x-html="marked.parse(activeItem.value)" class="text-slate-700 dark:text-slate-300 selection:bg-indigo-100 dark:selection:bg-indigo-900">
+                            </div>
+                        </article>
+
+                        <div class="mt-20 pt-8 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 dark:text-slate-500 font-mono flex justify-between uppercase">
+                            <span>End of Report</span>
+                            <span x-text="'Logged on ' + activeItem.date_display"></span>
+                        </div>
                     </div>
                 </div>
             </template>
