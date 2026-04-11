@@ -1,10 +1,12 @@
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import WebshareProxyConfig
+import requests
 import yt_dlp
 from datetime import datetime, timezone
 import time
 import concurrent.futures
 import logging
-from tasks.config import TASK_CONFIGS, MONGO_COLLECTIONS, GEN_AI_CLIENT, AI_MODEL, DOCUMENT, DOCUMENT_MAP, EXTRA_DOCUMENT_ARGS, PLAYLIST_FETCH_LIMIT, YOUTUBE_PLAYLIST_URL_TEMPLATE, YOUTUBE_PLAYLIST_IDS, EXECUTOR_WORKERS, INBETWEEN_TASK_SLEEP
+from tasks.config import TASK_CONFIGS, MONGO_COLLECTIONS, GEN_AI_CLIENT, AI_MODEL, DOCUMENT, DOCUMENT_MAP, EXTRA_DOCUMENT_ARGS, PLAYLIST_FETCH_LIMIT, YOUTUBE_PLAYLIST_URL_TEMPLATE, YOUTUBE_PLAYLIST_IDS, EXECUTOR_WORKERS, INBETWEEN_TASK_SLEEP, RAPID_API_KEY, RAPID_API_HOST, RAPID_API_URL
 
 class YouTubeLLMPipeline:
     def __init__(self, task_key="summarize"):
@@ -19,6 +21,9 @@ class YouTubeLLMPipeline:
         self.playlist_url_template = YOUTUBE_PLAYLIST_URL_TEMPLATE
         self.playlist_ids = YOUTUBE_PLAYLIST_IDS
         self.processed_video_ids = set()
+        self.rapid_api_key = RAPID_API_KEY
+        self.rapid_api_host = RAPID_API_HOST
+        self.rapid_api_url = RAPID_API_URL
 
     def check_id_if_present(self, video_id):
         """Checks if a video ID is already processed."""
@@ -29,25 +34,105 @@ class YouTubeLLMPipeline:
         existing = self.collection.find_one({"key": video_id})
         return existing is not None
 
-    def get_transcript(self, video):
-        """Generic transcript fetcher with language fallback."""
-        if not video or 'id' not in video:
-            logging.warning("Invalid video data provided for transcript fetching.")
-            return None
-        video_id = video['id']
-        if video_id is None or video_id.strip() == "" or self.check_id_if_present(video_id):
-            logging.info(f"Skipping transcript fetch for {video_id}: ID is missing or already processed.")
-            return None
+    # def get_transcript(self, video):
+    #     """Generic transcript fetcher with language fallback."""
+    #     if not video or 'id' not in video:
+    #         logging.warning("Invalid video data provided for transcript fetching.")
+    #         return None
+    #     video_id = video['id']
+    #     if video_id is None or video_id.strip() == "" or self.check_id_if_present(video_id):
+    #         logging.info(f"Skipping transcript fetch for {video_id}: ID is missing or already processed.")
+    #         return None
 
+    #     try:
+    #         ytt_api = YouTubeTranscriptApi()
+    #         transcript_list = ytt_api.list(video_id)
+    #         transcript = transcript_list.find_generated_transcript(['hi', 'en'])
+    #         logging.info(f"Transcript fetched for video ID {video_id} with language {transcript.language_code}")
+    #         return " ".join(snippet.text for snippet in transcript.fetch())
+    #     except Exception as e:
+    #         logging.error(f"Transcript fetch failed for {video_id}: {e}")
+    #         return None 
+
+    def _fetch_from_library(self, video_id):
+        """Method 1: Using youtube_transcript_api (PIP)"""
         try:
             ytt_api = YouTubeTranscriptApi()
             transcript_list = ytt_api.list(video_id)
             transcript = transcript_list.find_generated_transcript(['hi', 'en'])
-            logging.info(f"Transcript fetched for video ID {video_id} with language {transcript.language_code}")
             return " ".join(snippet.text for snippet in transcript.fetch())
         except Exception as e:
-            logging.error(f"Transcript fetch failed for {video_id}: {e}")
-            return None 
+            logging.warning(f"PIP Library failed for {video_id}: {e}")
+            return None
+
+    def _fetch_from_api(self, video_id):
+        """ 
+        Method 2: RapidAPI Fallback
+        Parses the 'content' list from the specific JSON structure provided.
+        """
+        try:
+            logging.info(f"Attempting RapidAPI fallback for video {video_id}...")
+            url = self.rapid_api_url
+            
+            params = {
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "videoId": video_id,
+                "lang": "en" 
+            }
+
+            headers = {
+                "x-rapidapi-key": self.rapid_api_key,
+                "x-rapidapi_host": self.rapid_api_host,
+                "Content-Type": "application/json"
+            }
+
+            response = requests.get(url, headers=headers, params=params, timeout=20)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                content_list = data.get('content', [])
+                
+                if not content_list:
+                    logging.warning(f"RapidAPI returned 200 but 'content' was empty for {video_id}")
+                    return None
+                
+                full_text = " ".join(
+                    snippet.get('text', '').strip() 
+                    for snippet in content_list 
+                    if snippet.get('text')
+                )
+                full_text = full_text.replace("♪", "").replace("[♪♪♪]", "").strip()
+                return full_text if len(full_text) > 0 else None
+            
+            logging.error(f"RapidAPI Error {response.status_code}: {response.text}")
+            return None
+
+        except Exception as e:
+            logging.error(f"RapidAPI request failed for {video_id}: {str(e)}")
+            return None
+
+    def get_transcript(self, video):
+        """Orchestrator: Tries Library first, then API fallback."""
+        if not video or 'id' not in video:
+            return None
+            
+        video_id = video['id']
+
+        if self.check_id_if_present(video_id):
+            logging.info(f"Skipping {video_id}: Already processed.")
+            return None
+        
+        transcript = self._fetch_from_library(video_id)
+        if not transcript:
+            transcript = self._fetch_from_api(video_id)
+            
+        if transcript:
+            logging.info(f"Successfully obtained transcript for {video_id}")
+            return transcript
+            
+        logging.error(f"All transcript sources failed for {video_id}")
+        return None
 
     def run_llm_action(self, transcript):
         """Executes the configured prompt."""
@@ -147,6 +232,7 @@ class YouTubeLLMPipeline:
         """The main execution flow for the entire pipeline."""
         videos = self.fetch_videos_from_playlists()
         logging.info(f"Total videos fetched: {len(videos)}")
+        videos.reverse()  # Process older videos first
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=EXECUTOR_WORKERS) as executor:
             executor.map(self.process_video, videos)
