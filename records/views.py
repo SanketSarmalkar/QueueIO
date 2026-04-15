@@ -13,6 +13,9 @@ import os
 import json
 from pymongo.server_api import ServerApi
 
+def custom_404(request, exception):
+    return render(request, '404.html', status=404)
+
 @login_required
 def dashboard(request):
     is_authorized = request.user.groups.filter(name__in=['Analyst', 'Supervisor']).exists()
