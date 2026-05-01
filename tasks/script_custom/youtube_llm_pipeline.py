@@ -25,6 +25,7 @@ class YouTubeLLMPipeline:
         self.rapid_api_key = RAPID_API_KEY
         self.rapid_api_host = RAPID_API_HOST
         self.rapid_api_url = RAPID_API_URL
+        self.supadata = Supadata(api_key=SUPADATA_API_KEY)
 
     def check_id_if_present(self, video_id):
         """Checks if a video ID is already processed."""
