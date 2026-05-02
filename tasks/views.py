@@ -2,6 +2,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 import logging
 import json
+from django.shortcuts import render
 from .script_custom.youtube_llm_pipeline import YouTubeLLMPipeline
 from .script_custom.slack_alerting import send_slack_alert
 
@@ -66,3 +67,10 @@ def slack_alert(request):
     except Exception as e:
         logging.error(f"Slack alert error: {str(e)}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    
+
+def video_page(request, video_id):
+    return render(request, "video_page.html", {
+        "video_id": video_id
+    })
+
