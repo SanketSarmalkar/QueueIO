@@ -11,7 +11,12 @@ from datetime import datetime
 from google import genai
 import os
 import json
+from bson import ObjectId
 from pymongo.server_api import ServerApi
+
+from tasks.models import TaskConfiguration, GlobalSetting
+from django.contrib.auth.decorators import user_passes_test
+
 
 def custom_404(request, exception):
     return render(request, '404.html', status=404)
@@ -24,7 +29,7 @@ def dashboard(request):
 
     collection = get_db_collection()
     
-    records = list(collection.find().sort('createdat', -1))
+    records = list(collection.find({}, {'value': 0, 'embedding': 0}).sort('createdat', -1))
     
     formatted_items = []
     for item in records:
@@ -43,48 +48,59 @@ def dashboard(request):
             'category': item.get('category', 'queuei'),
             'key': item.get('key', ''),
             'title': item.get('a', 'Untitled Record').split('|')[0].strip(),
-            'value': item.get('value', ''),
+            # 'value': item.get('value', ''),
             'date_display': date_display,
             'time_display': time_display,
             'playlist_id': item.get('playlist_id', None),
             'playlist_title': item.get('playlist_title', item.get('playlist_id', 'General Archive'))
         })
+
+    tasks_query = TaskConfiguration.objects.all().values(
+        'id', 'task_key', 'display_name', 'prompt_template', 'target_collection', 'is_active'
+    )
+    tasks_list = list(tasks_query)
         
     return render(request, 'dashboard.html', {
         'items_raw': formatted_items,
-        'latest_id': formatted_items[0]['id'] if formatted_items else ''
+        'latest_id': formatted_items[0]['id'] if formatted_items else '',
+        'tasks_json': tasks_list
     })
 
 def logout_view(request):
     logout(request)
     return redirect('login')
 
-# def signup_view(request):
-#     if request.method == 'POST':
-#         form = UserCreationForm(request.POST)
-#         if form.is_valid():
-#             user = form.save()
-#             login(request, user) # Log the user in immediately after signup
-#             return redirect('dashboard')
-#     else:
-#         form = UserCreationForm()
-#     return render(request, 'signup.html', {'form': form})
-
 def signup_view(request):
     if request.method == 'POST':
         form = UserCreationForm(request.POST)
         if form.is_valid():
             user = form.save(commit=False)
-            # BLOCK ACCESS: New users are not active until Admin says so
             user.is_active = False 
             user.save()
             
-            # Show a terminal-style success message
             messages.success(request, "ACCESS REQUEST SENT. AWAITING SUPERVISOR AUTHORIZATION.")
             return redirect('login')
     else:
         form = UserCreationForm()
     return render(request, 'signup.html', {'form': form})
+
+@login_required
+def get_report_content(request, report_id):
+    collection = get_db_collection()
+    report = collection.find_one({"_id": ObjectId(report_id)}, {"value": 1, "entities": 1})
+    raw_entities = report.get('entities', '{}')
+    if isinstance(raw_entities, str):
+        try:
+            entities_data = json.loads(raw_entities.strip())
+        except Exception:
+            entities_data = {"people": [], "locations": [], "organizations": []}
+    else:
+        entities_data = raw_entities
+
+    return JsonResponse({
+        "value": report.get('value', 'No content found.'),
+        "entities": entities_data
+    })
 
 def get_db_collection():
     db_password = os.getenv('DB_PASSWORD', '').replace('"', '')
@@ -158,3 +174,106 @@ def intel_chat_view(request):
         except Exception as e:
             return JsonResponse({"answer": f"SYSTEM ERROR: {str(e)}"}, status=500)
     return redirect('dashboard')
+
+def is_supervisor(user):
+    return user.groups.filter(name='Supervisor').exists() or user.is_superuser
+
+@login_required
+@user_passes_test(is_supervisor)
+def command_center_view(request):
+    """
+    Handles POST requests from the Command Center UI.
+    Note: For GET requests, we usually want to stay on the dashboard,
+    but if they hit this URL directly, we need to provide the same data.
+    """
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            action = data.get('action')
+            
+            if action == 'create_task':
+                if TaskConfiguration.objects.filter(task_key=data['task_key']).exists():
+                    return JsonResponse({'status': 'error', 'message': 'Task Key already exists'}, status=400)
+                task = TaskConfiguration(task_key=data['task_key'])
+            
+            elif action == 'update_task':
+                task = TaskConfiguration.objects.get(id=data['id'])
+            
+            elif action == 'delete_task':
+                TaskConfiguration.objects.filter(id=data['id']).delete()
+                return JsonResponse({'status': 'success'})
+
+            task.display_name = data['display_name']
+            task.prompt_template = data['prompt_template']
+            task.target_collection = data.get('target_collection', 'mass_records')
+            task.is_active = data.get('is_active', True)
+            task.save()
+            
+            return JsonResponse({
+                'status': 'success', 
+                'task': {
+                    'id': task.id,
+                    'task_key': task.task_key,
+                    'display_name': task.display_name,
+                    'prompt_template': task.prompt_template,
+                    'target_collection': task.target_collection,
+                    'is_active': task.is_active
+                }
+            })
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+    return redirect('dashboard')
+
+@login_required
+def get_nexus_graph(request):
+    collection = get_db_collection()
+    reports = list(collection.find({"entities": {"$exists": True}}).sort('createdat', -1).limit(500))
+    
+    nodes = []
+    links = []
+    node_map = {} 
+
+    for doc in reports:
+        report_id = str(doc['_id'])
+        nodes.append({
+            "id": report_id,
+            "name": doc.get('a', 'Untitled').split('|')[0].strip(),
+            "type": "report",
+            "color": "#818cf8", # Brighter Indigo
+            "val": 28          # Large anchor node
+        })
+
+        raw_entities = doc.get('entities', {})
+        if isinstance(raw_entities, str):
+            try:
+                entities = json.loads(raw_entities.strip())
+            except Exception:
+                entities = {"people": [], "locations": [], "organizations": []}
+        else:
+            entities = raw_entities
+        entity_config = {
+            'locations': '#10b981', # Emerald
+            'people': '#3b82f6',    # Blue
+            'organizations': '#f59e0b' # Amber
+        }
+
+        for cat, color in entity_config.items():
+            for entity_name in entities.get(cat, []):
+                ent_id = f"ent_{entity_name.lower().replace(' ', '_')}"
+                
+                if ent_id not in node_map:
+                    node_map[ent_id] = True
+                    nodes.append({
+                        "id": ent_id,
+                        "name": entity_name,
+                        "type": cat,
+                        "color": color,   
+                        "val": 12          
+                    })
+                
+                links.append({
+                    "source": report_id,
+                    "target": ent_id
+                })
+
+    return JsonResponse({"nodes": nodes, "links": links})

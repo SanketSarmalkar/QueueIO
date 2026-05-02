@@ -1,94 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" x-data="{ 
-    darkMode: localStorage.getItem('darkMode') === 'true',
-    sidebarOpen: true,
-    viewMode: 'stacks', // New: 'stacks' or 'entries'
-    selectedPlaylistId: null, // New
-    selectedId: '{{ latest_id }}',
-    searchQuery: '',
-    chatQuery: '',
-    chatLoading: false,
-    chatMessages: [],
-    items: JSON.parse(document.getElementById('items-data').textContent),
-    toggleDark() {
-        this.darkMode = !this.darkMode;
-        localStorage.setItem('darkMode', this.darkMode);
-    },
-    // Grouping Logic: Create unique stacks based on playlist_id
-    get playlistStacks() {
-        const groups = {};
-        this.items.forEach(item => {
-            const pid = item.playlist_id || 'unassigned';
-            if (!groups[pid]) {
-                groups[pid] = { 
-                    id: pid, 
-                    count: 0, 
-                    latestDate: item.date_display,
-                    title: item.playlist_title || 'General Archive', // Assumes you pass playlist title
-                    display_name: pid === 'unassigned' ? 'General Archive' : pid
-                };
-            }
-            groups[pid].count++;
-        });
-        return Object.values(groups);
-    },
-    // Filtered Items: Now filters by BOTH search and selected playlist
-    get filteredItems() {
-        return this.items.filter(i => {
-            const matchesSearch = i.title.toLowerCase().includes(this.searchQuery.toLowerCase());
-            const itemPid = i.playlist_id || 'unassigned';
-            const matchesPlaylist = this.selectedPlaylistId ? (itemPid === this.selectedPlaylistId) : true;
-            return matchesSearch && matchesPlaylist;
-        })
-    },
-    openStack(id) {
-        this.selectedPlaylistId = id;
-        this.viewMode = 'entries';
-        // Auto-select the first item in the stack
-        const firstInStack = this.items.find(i => i.playlist_id === id);
-        if (firstInStack) this.selectedId = firstInStack.id;
-    },
-    goBackToStacks() {
-        this.viewMode = 'stacks';
-        this.selectedPlaylistId = null;
-    },
-    async sendChatQuery() {
-        if (!this.chatQuery.trim() || this.chatLoading) return;
-        this.chatLoading = true;
-        
-        const userMsg = this.chatQuery;
-        this.chatMessages.push({ role: 'user', text: userMsg });
-        this.chatQuery = '';
-
-        try {
-            const response = await fetch('/intel-chat/', { // Ensure this matches your urls.py
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}'
-                },
-                body: JSON.stringify({ query: userMsg })
-            });
-            const data = await response.json();
-            this.chatMessages.push({ 
-                role: 'ai', 
-                text: marked.parse(data.answer), 
-                sources: data.sources 
-            });
-        } catch (e) {
-            this.chatMessages.push({ role: 'ai', text: 'SYSTEM ERROR: Intelligence uplink failed.' });
-        } finally {
-            this.chatLoading = false;
-            // Auto-scroll logic
-            this.$nextTick(() => { 
-                const el = document.getElementById('chat-scroll');
-                if (el) el.scrollTop = el.scrollHeight;
-            });
-        }
-    },
-    get activeItem() { return this.items.find(i => i.id === this.selectedId) }
-}" :class="{ 'dark': darkMode }">
+<html lang="en" x-data="terminal" :class="{ 'dark': darkMode }">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -103,8 +15,302 @@
     </script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/force-graph"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/typography@0.5.10/dist/typography.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <script>
+        let nexusGraphInstance = null;
+        let NEXUS_ENGINE = null;
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('terminal', () => ({
+                darkMode: localStorage.getItem('darkMode') === 'true',
+                sidebarOpen: true,
+                viewMode: 'stacks',
+                selectedPlaylistId: null,
+                selectedId: '{{ latest_id }}',
+                searchQuery: '',
+                chatQuery: '',
+                chatLoading: false,
+                chatMessages: [],
+                showNewTaskModal: false,
+                newTask: { 
+                    task_key: '', display_name: '', prompt_template: '', 
+                    target_collection: 'mass_records', is_active: true 
+                },
+                items: [],
+                tasks: [],
+                hoverNode: null,
+                nexusLoading: false,
+    
+                init() {
+                    try {
+                        const itemsData = document.getElementById('items-data');
+                        const tasksData = document.getElementById('tasks-data');
+                        
+                        this.items = itemsData ? JSON.parse(itemsData.textContent) : [];
+                        this.tasks = tasksData ? JSON.parse(tasksData.textContent) : [];
+                        
+                        this.$watch('searchQuery', (value) => {
+                            if (this.viewMode !== 'nexus' || !NEXUS_ENGINE) return;
+    
+                            NEXUS_ENGINE.nodeColor(NEXUS_ENGINE.nodeColor());
+                            NEXUS_ENGINE.linkColor(NEXUS_ENGINE.linkColor());
+    
+                            const term = value.toLowerCase().trim();
+                            if (term.length < 2) return;
+    
+                            const nodes = NEXUS_ENGINE.graphData().nodes;
+                            const target = nodes.find(n => n.name && n.name.toLowerCase().includes(term));
+    
+                            if (target) {
+                                console.log("🚀 FLYING TO TARGET:", target.name);
+                                NEXUS_ENGINE.centerAt(target.x, target.y, 1000);
+                                NEXUS_ENGINE.zoom(4, 1000);
+                                this.hoverNode = target;
+                            }
+                        });
+                
+                        console.log("✅ System Initialized and Watchers Active.");
+                    } catch (e) {
+                        print("❌ Initialization Error:", e);
+                    }
+                },
+
+                async selectItem(id) {
+                    this.selectedId = id;
+                    this.viewMode = 'entries';
+                    const item = this.items.find(i => i.id === id);
+                    
+                    if (item && !item.value) {
+                        item.loading = true;
+                        try {
+                            const response = await fetch(`/get-report/${id}/`);
+                            const data = await response.json();
+                            
+                            item.value = data.value;
+                
+                            let cleanEntities = data.entities;
+                            if (typeof cleanEntities === 'string') {
+                                try {
+                                    cleanEntities = JSON.parse(cleanEntities);
+                                } catch(e) {
+                                    cleanEntities = { people: [], locations: [], organizations: [] };
+                                }
+                            }
+                            item.entities = cleanEntities;
+                            console.log("Dossier Data Loaded:", item.entities);
+                
+                        } catch (e) {
+                            item.value = "Error loading content.";
+                        } finally {
+                            item.loading = false;
+                        }
+                    }
+                },
+
+                toggleDark() { 
+                    this.darkMode = !this.darkMode;
+                    localStorage.setItem('darkMode', this.darkMode);
+                },
+    
+                get playlistStacks() {
+                    const groups = {};
+                    this.items.forEach(item => {
+                        const pid = item.playlist_id || 'unassigned';
+                        if (!groups[pid]) {
+                            groups[pid] = { id: pid, count: 0, title: item.playlist_title || 'General Archive' };
+                        }
+                        groups[pid].count++;
+                    });
+                    return Object.values(groups);
+                },
+    
+                get filteredItems() {
+                    return this.items.filter(i => {
+                        const matchesSearch = i.title.toLowerCase().includes(this.searchQuery.toLowerCase());
+                        const itemPid = i.playlist_id || 'unassigned';
+                        const matchesPlaylist = this.selectedPlaylistId ? (itemPid === this.selectedPlaylistId) : true;
+                        return matchesSearch && matchesPlaylist;
+                    });
+                },
+    
+                get activeItem() { 
+                    return this.items.find(i => i.id === this.selectedId) || null; 
+                },
+    
+                openStack(id) {
+                    this.selectedPlaylistId = id;
+                    this.viewMode = 'entries';
+                    const first = this.items.find(i => (i.playlist_id || 'unassigned') === id);
+                    if (first) this.selectItem(first.id);
+                },
+    
+                goBackToStacks() {
+                    this.viewMode = 'stacks';
+                    this.selectedPlaylistId = null;
+                },
+    
+                async saveTask(task, isNew = false) {
+                    try {
+                        const response = await fetch('/command-center/', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                            body: JSON.stringify({ action: isNew ? 'create_task' : 'update_task', ...task })
+                        });
+                        const data = await response.json();
+                        if (response.ok) {
+                            if (isNew) {
+                                this.tasks.push(data.task);
+                                this.showNewTaskModal = false;
+                                this.newTask = { task_key: '', display_name: '', prompt_template: '', target_collection: 'mass_records', is_active: true };
+                            }
+                            alert('LOGIC DEPLOYED.');
+                        } else { alert('ERROR: ' + data.message); }
+                    } catch (e) { alert('UPLINK FAILED.'); }
+                },
+
+                async sendChatQuery() {
+                    if (!this.chatQuery.trim() || this.chatLoading) return;
+                    
+                    this.chatLoading = true;
+                    const userMsg = this.chatQuery;
+                    this.chatMessages.push({ role: 'user', text: userMsg });
+                    this.chatQuery = '';
+                
+                    this.$nextTick(() => { 
+                        const el = document.getElementById('chat-scroll');
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+                
+                    try {
+                        const response = await fetch('/intel-chat/', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': '{{ csrf_token }}'
+                            },
+                            body: JSON.stringify({ query: userMsg })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        const parsedText = typeof marked !== 'undefined' ? marked.parse(data.answer) : data.answer;
+                        
+                        this.chatMessages.push({ 
+                            role: 'ai', 
+                            text: parsedText, 
+                            sources: data.sources || []
+                        });
+                    } catch (e) {
+                        this.chatMessages.push({ role: 'ai', text: 'SYSTEM ERROR: Intelligence uplink failed.' });
+                    } finally {
+                        this.chatLoading = false;
+                        this.$nextTick(() => { 
+                            const el = document.getElementById('chat-scroll');
+                            if (el) el.scrollTop = el.scrollHeight;
+                        });
+                    }
+                },
+
+                async initNexusGraph() {
+                    if (typeof ForceGraph === 'undefined') {
+                        const script = document.createElement('script');
+                        script.src = "https://unpkg.com/force-graph";
+                        document.head.appendChild(script);
+                        script.onload = () => this.renderNexus();
+                    } else {
+                        this.renderNexus();
+                    }
+                },
+    
+                async renderNexus() {
+
+                    if (NEXUS_ENGINE) {
+                        console.log("⚡ Nexus Engine active. Resuming session.");
+                        return; 
+                    }
+
+                    this.nexusLoading = true;
+
+                    this.$nextTick(async () => {
+                        const elem = document.getElementById('nexus-canvas');
+                        if (!elem) return;
+    
+                        const response = await fetch('/nexus-data/');
+                        const data = await response.json();
+
+                        this.nexusData = data;
+    
+                        if (NEXUS_ENGINE) NEXUS_ENGINE._destructor();
+    
+                        NEXUS_ENGINE = ForceGraph()(elem)
+                            .graphData(data)
+                            .nodeId('id')
+                            .backgroundColor('#020617')
+                            
+                            .d3Force('charge', d3.forceManyBody().strength(-1500)) 
+                            .d3Force('link', d3.forceLink().distance(150))
+                            .d3Force('center', d3.forceCenter())
+                            
+                            .linkColor(() => '#1e293b') 
+                            .linkWidth(0.7)
+    
+                            .nodeCanvasObject((node, ctx, globalScale) => {
+                                const searchTerm = this.searchQuery.toLowerCase().trim();
+                                const isMatch = searchTerm.length > 1 && node.name?.toLowerCase().includes(searchTerm);
+                                
+                                ctx.globalAlpha = (searchTerm.length > 1 && !isMatch) ? 0.05 : 1;
+    
+                                ctx.beginPath();
+                                ctx.arc(node.x, node.y, 12 / globalScale, 0, 2 * Math.PI);
+                                ctx.fillStyle = node.color || '#6366f1';
+                                ctx.shadowBlur = isMatch ? 30 : 10;
+                                ctx.shadowColor = node.color || '#6366f1';
+                                ctx.fill();
+    
+                                ctx.beginPath();
+                                ctx.arc(node.x, node.y, 5 / globalScale, 0, 2 * Math.PI);
+                                ctx.fillStyle = "#fff";
+                                ctx.fill();
+    
+                                if (isMatch || globalScale > 3) {
+                                    ctx.shadowBlur = 0;
+                                    ctx.font = `${16/globalScale}px Inter, sans-serif`;
+                                    ctx.textAlign = 'center';
+                                    ctx.fillStyle = isMatch ? '#fff' : '#64748b';
+                                    ctx.fillText(node.name, node.x, node.y + 20/globalScale);
+                                }
+                                ctx.globalAlpha = 1;
+                            })
+                            .onNodeClick(node => {
+                                NEXUS_ENGINE.centerAt(node.x, node.y, 800);
+                                NEXUS_ENGINE.zoom(4, 800);
+                                if (node.type === 'report') {
+                                    setTimeout(() => { this.selectItem(node.id); }, 900);
+                                }
+                            });
+                            setTimeout(() => {
+                                this.nexusLoading = false;
+                            }, 1200);
+                    });
+                },
+
+                jumpToSource(src) {
+                    // 1. If it's a report, select it and switch to entries view
+                    if (src.id) {
+                        this.selectItem(src.id);
+                        this.viewMode = 'entries';
+                        
+                        // 2. Optional: If you want to show it on the map instead
+                        // this.viewMode = 'nexus';
+                        // this.searchQuery = src.title; 
+                    }
+                },
+            }));
+        });
+    </script>
 
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 5px; }
@@ -118,13 +324,24 @@
         .dark .prose strong { color: #818cf8; }
         
         [x-cloak] { display: none !important; }
+        .alpine-ready {
+            animation: fadeIn 0.4s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
     </style>
 </head>
 
-{{ items_raw|json_script:"items-data" }}
 
-<body class="bg-slate-50 dark:bg-slate-950 h-screen overflow-hidden flex flex-col font-sans transition-colors duration-300">
-
+<body 
+    x-cloak 
+    :class="{ 'alpine-ready': true, 'bg-slate-50 dark:bg-slate-950': true }" 
+    class="h-screen overflow-hidden flex flex-col font-sans transition-colors duration-300"
+>
+    {{ items_raw|json_script:"items-data" }}
+    {{ tasks_json|json_script:"tasks-data" }}
     <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between shadow-lg z-50 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
             <button @click="sidebarOpen = !sidebarOpen" class="p-2 -ml-2 text-slate-400 hover:text-white transition-all">
@@ -142,7 +359,9 @@
         <div class="flex items-center gap-6">
             <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400">
                 <span class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full animate-pulse" :class="darkMode ? 'bg-indigo-400' : 'bg-green-500'"></span> 
+                    <span class="w-2 h-2 rounded-full" 
+                        :class="[darkMode ? 'bg-indigo-400' : 'bg-green-500', items.length > 0 ? 'animate-pulse' : '']">
+                    </span>
                     SYSTEM LIVE
                 </span>
                 <span class="uppercase">{% now "d M Y" %}</span>
@@ -159,6 +378,29 @@
                         class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
                     Intel Chat
                 </button>
+                <div class="flex items-center gap-1">
+                    <button @click="viewMode = 'nexus'; initNexusGraph()" 
+                            :class="viewMode === 'nexus' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white'"
+                            class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
+                        Nexus Map
+                    </button>
+                
+                    <button x-show="viewMode === 'nexus'"
+                            x-transition
+                            @click="NEXUS_ENGINE = null; renderNexus()" 
+                            class="p-1 text-indigo-500 hover:text-indigo-400 transition-colors"
+                            title="Sync Archive">
+                        <i class="fa-solid fa-rotate text-[10px]" :class="nexusLoading && 'animate-spin'"></i>
+                    </button>
+                </div>
+
+                {% if user.is_superuser %} 
+                <button @click="viewMode = 'command'" 
+                        :class="viewMode === 'command' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white'"
+                        class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
+                    Command Center
+                </button>
+                {% endif %}
             </nav>
 
             <button @click="toggleDark()" class="p-2 rounded-full hover:bg-slate-800 transition-colors text-slate-400 hover:text-indigo-400">
@@ -193,7 +435,7 @@
             
             <div class="flex-1 overflow-y-auto custom-scrollbar">
                 <template x-for="item in filteredItems" :key="item.key">
-                    <div @click="selectedId = item.id"
+                    <div @click="selectItem(item.id)"
                          :class="selectedId === item.id 
                             ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600') 
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'"
@@ -213,24 +455,45 @@
 
         <main class="flex-1 overflow-y-auto bg-white dark:bg-slate-950 custom-scrollbar relative transition-colors duration-300">
             <template x-if="viewMode === 'chat'">
-                <div class="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
-                    <div id="chat-scroll" class="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 custom-scrollbar">
+                <div class="h-full flex flex-col bg-slate-50 dark:bg-slate-950 relative">
+                    
+                    <div class="absolute top-4 right-6 z-10 flex gap-2">
+                        <button @click="chatMessages = []" 
+                                class="bg-slate-900/50 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-lg text-[9px] font-black text-slate-500 hover:text-red-400 transition-all uppercase tracking-widest">
+                            <i class="fa-solid fa-trash-can mr-1"></i> Clear Terminal
+                        </button>
+                    </div>
+            
+                    <div id="chat-scroll" class="flex-1 overflow-y-auto p-6 md:p-12 space-y-10 custom-scrollbar">
                         <template x-for="(msg, index) in chatMessages" :key="index">
                             <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
+                                
+                                <span class="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2 px-2" 
+                                      x-text="msg.role === 'user' ? 'Operator Query' : 'System Intelligence'"></span>
+            
                                 <div :class="msg.role === 'user' 
-                                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-indigo-500/10' 
-                                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none shadow-xl'"
-                                    class="max-w-[85%] p-5 md:p-7">
+                                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-2xl shadow-indigo-500/20 px-5 py-3 md:px-6 md:py-4' 
+                                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none shadow-xl p-6 md:p-8'"
+                                    class="max-w-[85%] relative group">
                                     
-                                    <div class="prose prose-sm dark:prose-invert" x-html="msg.text"></div>
+                                    <template x-if="msg.role === 'ai'">
+                                        <div class="absolute top-0 left-0 w-1 h-full bg-indigo-500 rounded-tl-2xl"></div>
+                                    </template>
+                                    
+                                    <div class="prose prose-sm dark:prose-invert leading-relaxed" x-html="msg.text"></div>
             
                                     <template x-if="msg.sources && msg.sources.length > 0">
-                                        <div class="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
-                                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Verified Intelligence Sources</p>
+                                        <div class="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
+                                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
+                                                <i class="fa-solid fa-link text-indigo-500"></i> Verified Intelligence Anchors
+                                            </p>
                                             <div class="flex flex-wrap gap-2">
                                                 <template x-for="src in msg.sources">
-                                                    <span class="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded text-[9px] font-bold text-indigo-500 border border-indigo-500/20"
-                                                          x-text="src.title"></span>
+                                                    <button @click="jumpToSource(src)" 
+                                                            class="bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 px-3 py-1.5 rounded-md text-[9px] font-bold text-indigo-400 transition-all flex items-center gap-2 group/btn">
+                                                        <span x-text="src.title"></span>
+                                                        <i class="fa-solid fa-arrow-up-right-from-square opacity-0 group-hover/btn:opacity-100 transition-opacity"></i>
+                                                    </button>
                                                 </template>
                                             </div>
                                         </div>
@@ -239,29 +502,30 @@
                             </div>
                         </template>
             
-                        <div x-show="chatLoading" class="flex items-center gap-3 text-indigo-500 font-mono text-[10px] tracking-[0.2em]">
-                            <span class="relative flex h-2 w-2">
-                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                                <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                            </span>
-                            ANALYZING ARCHIVE DATA...
+                        <div x-show="chatLoading" class="flex flex-col gap-4 animate-pulse">
+                            <div class="flex items-center gap-3 text-indigo-500 font-mono text-[9px] tracking-[0.3em]">
+                                <i class="fa-solid fa-microchip animate-spin"></i> CROSS-REFERENCING ARCHIVE...
+                            </div>
+                            <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
                         </div>
                     </div>
             
-                    <div class="p-6 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
-                        <div class="max-w-4xl mx-auto relative group">
+                    <div class="p-8 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+                        <div class="max-w-5xl mx-auto relative">
                             <input 
                                 type="text" 
                                 x-model="chatQuery" 
                                 @keyup.enter.prevent="sendChatQuery()"
-                                placeholder="Query the 3072-dim Intelligence Archive..."
-                                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-6 pr-16 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all shadow-inner"
+                                placeholder="Ask about China, US relations, or specific report entities..."
+                                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-5 pl-8 pr-20 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-inner font-medium"
                             >
-                            <button @click="sendChatQuery()" class="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-xl transition-colors">
-                                <i class="fa-solid fa-paper-plane text-xs"></i>
-                            </button>
+                            <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                <span class="text-[8px] font-black text-slate-500 uppercase mr-2 hidden md:block">Press Enter ↵</span>
+                                <button @click="sendChatQuery()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center">
+                                    <i class="fa-solid fa-bolt-lightning text-xs"></i>
+                                </button>
+                            </div>
                         </div>
-                        <p class="text-center text-[9px] text-slate-400 mt-3 font-mono uppercase tracking-widest">Cross-Intel Synthesis Engine v1.0 // Secure Uplink Active</p>
                     </div>
                 </div>
             </template>
@@ -299,29 +563,204 @@
                     <button @click="goBackToStacks()" class="mb-6 text-[10px] font-bold text-indigo-500 uppercase flex items-center gap-2 hover:text-indigo-400">
                         <i class="fa-solid fa-chevron-left"></i> Back to Stacks
                     </button>
-                    <div class="max-w-4xl mx-auto p-12 animate-in fade-in duration-500">
-                        <div class="flex items-center gap-3 mb-4">
-                            <span class="text-indigo-600 dark:text-indigo-400 font-black text-xs tracking-widest uppercase" x-text="activeItem.category"></span>
-                            <span class="text-slate-300 dark:text-slate-700">/</span>
-                            <span class="text-slate-500 dark:text-slate-500 text-xs font-mono" x-text="'REF: ' + activeItem.key"></span>
-                        </div>
+            
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="text-indigo-600 dark:text-indigo-400 font-black text-xs tracking-widest uppercase" x-text="activeItem.category"></span>
+                        <span class="text-slate-300 dark:text-slate-700">/</span>
+                        <span class="text-slate-500 dark:text-slate-500 text-xs font-mono" x-text="'REF: ' + activeItem.key"></span>
+                    </div>
+            
+                    <h1 class="text-4xl font-black text-slate-900 dark:text-white mb-8 leading-[1.1]" x-text="activeItem.title"></h1>
+                    
+                    <div class="h-1 w-20 bg-indigo-600 dark:bg-indigo-500 mb-12 rounded-full"></div>
 
-                        <h1 class="text-4xl font-black text-slate-900 dark:text-white mb-8 leading-[1.1]" x-text="activeItem.title"></h1>
+                    <div class="flex flex-wrap gap-2 mb-10">
+                        <template x-for="loc in (activeItem.entities?.locations || [])">
+                            <button @click="searchQuery = loc; viewMode = 'entries'; selectedPlaylistId = null" 
+                                    class="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-bold rounded uppercase hover:bg-emerald-500 hover:text-white transition-all">
+                                <i class="fa-solid fa-location-dot mr-1"></i> <span x-text="loc"></span>
+                            </button>
+                        </template>
                         
-                        <div class="h-1 w-20 bg-indigo-600 dark:bg-indigo-500 mb-12 rounded-full"></div>
-
-                        <article class="prose prose-slate dark:prose-invert lg:prose-lg prose-indigo">
-                            <div x-html="marked.parse(activeItem.value)" class="text-slate-700 dark:text-slate-300 selection:bg-indigo-100 dark:selection:bg-indigo-900">
+                        <template x-for="person in (activeItem.entities?.people || [])">
+                            <button @click="searchQuery = person; viewMode = 'entries'; selectedPlaylistId = null" 
+                                    class="px-2 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-bold rounded uppercase hover:bg-blue-500 hover:text-white transition-all">
+                                <i class="fa-solid fa-user mr-1"></i> <span x-text="person"></span>
+                            </button>
+                        </template>
+            
+                        <template x-for="org in (activeItem.entities?.organizations || [])">
+                            <button @click="searchQuery = org; viewMode = 'entries'; selectedPlaylistId = null" 
+                                    class="px-2 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-bold rounded uppercase hover:bg-amber-500 hover:text-white transition-all">
+                                <i class="fa-solid fa-building mr-1"></i> <span x-text="org"></span>
+                            </button>
+                        </template>
+                    </div>
+            
+                    <article class="prose prose-slate dark:prose-invert lg:prose-lg prose-indigo">
+                        <template x-if="activeItem.loading">
+                            <div class="space-y-4 animate-pulse mt-8">
+                                <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-3/4"></div>
+                                <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded"></div>
+                                <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-5/6"></div>
+                                <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
                             </div>
-                        </article>
+                        </template>
+            
+                        <template x-if="!activeItem.loading">
+                            <div x-html="marked.parse(activeItem.value || '')" 
+                                 class="text-slate-700 dark:text-slate-300 selection:bg-indigo-100 dark:selection:bg-indigo-900">
+                            </div>
+                        </template>
+                    </article>
+                    <div class="mt-20 pt-8 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 dark:text-slate-500 font-mono flex justify-between uppercase">
+                        <span>End of Report</span>
+                        <span x-text="'Logged on ' + activeItem.date_display"></span>
+                    </div>
+                </div>
+            </template>
 
-                        <div class="mt-20 pt-8 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 dark:text-slate-500 font-mono flex justify-between uppercase">
-                            <span>End of Report</span>
-                            <span x-text="'Logged on ' + activeItem.date_display"></span>
+            <template x-if="viewMode === 'command'">
+                <div class="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950 p-8 md:p-12 custom-scrollbar">
+                    <div class="max-w-5xl mx-auto">
+                        
+                        <div class="flex justify-between items-center mb-10">
+                            <div>
+                                <h2 class="text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">System <span class="text-indigo-500">Command</span></h2>
+                            </div>
+                            <button @click="showNewTaskModal = !showNewTaskModal" 
+                                    class="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold px-6 py-3 rounded-xl transition-all shadow-lg uppercase tracking-widest flex items-center gap-2">
+                                <i class="fa-solid" :class="showNewTaskModal ? 'fa-xmark' : 'fa-plus'"></i>
+                                <span x-text="showNewTaskModal ? 'Cancel' : 'Initialize New Task'"></span>
+                            </button>
+                        </div>
+            
+                        <div x-show="showNewTaskModal" x-transition class="mb-12 bg-indigo-600/5 border-2 border-dashed border-indigo-500/30 rounded-3xl p-8">
+                            <h3 class="text-indigo-400 font-bold uppercase text-[10px] tracking-[0.2em] mb-6">Initialize New Intelligence Logic</h3>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                                <div class="space-y-2">
+                                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest">System Key (Unique ID)</label>
+                                    <input x-model="newTask.task_key" type="text" placeholder="e.g. risk_analysis" 
+                                           class="w-full bg-[#0B0F19] border border-slate-800 rounded-xl p-3 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all">
+                                </div>
+                                
+                                <div class="space-y-2">
+                                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Display Name</label>
+                                    <input x-model="newTask.display_name" type="text" placeholder="e.g. Geopolitical Risk" 
+                                           class="w-full bg-[#0B0F19] border border-slate-800 rounded-xl p-3 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all">
+                                </div>
+                        
+                                <div class="space-y-2">
+                                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Target Collection</label>
+                                    <select x-model="newTask.target_collection" 
+                                            class="w-full bg-[#0B0F19] border border-slate-800 rounded-xl p-3 text-sm text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all">
+                                        <option value="mass_records">mass_records</option>
+                                        <option value="action_items">action_items</option>
+                                        <option value="analytics">analytics</option>
+                                    </select>
+                                </div>
+                            </div>
+                        
+                            <div class="space-y-2 mb-8">
+                                <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest">AI Instruction (Prompt Template)</label>
+                                <textarea x-model="newTask.prompt_template" rows="5" 
+                                          placeholder="Analyze the following for... {transcript}" 
+                                          class="w-full bg-[#0B0F19] border border-slate-800 rounded-xl p-5 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono leading-relaxed"></textarea>
+                                <p class="text-[9px] text-slate-600 mt-2 font-mono italic">Note: Ensure you include the <b>{transcript}</b> placeholder in your prompt.</p>
+                            </div>
+                        
+                            <button @click="saveTask(newTask, true)" 
+                                    class="w-full bg-indigo-600 py-4 rounded-xl text-white font-bold uppercase tracking-[0.2em] text-xs hover:bg-indigo-500 shadow-lg shadow-indigo-600/20 transition-all active:scale-[0.98]">
+                                Deploy New Intelligence Stack
+                            </button>
+                        </div>
+            
+                        <div class="grid gap-8">
+                            <template x-for="task in tasks" :key="task.id">
+                                <div class="bg-[#0B0F19] border border-slate-800 rounded-3xl p-8 shadow-2xl relative group overflow-hidden">
+                                    <div class="flex justify-between items-start mb-6">
+                                        <div>
+                                            <h3 class="text-lg font-bold text-white uppercase tracking-tight" x-text="task.display_name"></h3>
+                                            <div class="flex gap-4 mt-2">
+                                                <span class="text-[9px] font-mono text-slate-500 uppercase" x-text="'Key: ' + task.task_key"></span>
+                                                <span class="text-[9px] font-mono text-indigo-400 uppercase" x-text="'Target: ' + task.target_collection"></span>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 px-3 py-1 bg-slate-900 rounded-full border border-slate-800">
+                                            <span :class="task.is_active ? 'bg-emerald-500' : 'bg-red-500'" class="w-1.5 h-1.5 rounded-full"></span>
+                                            <span class="text-[8px] font-black text-slate-400 uppercase" x-text="task.is_active ? 'Online' : 'Offline'"></span>
+                                        </div>
+                                    </div>
+                        
+                                    <div class="space-y-4">
+                                        <textarea 
+                                            x-model="task.prompt_template"
+                                            class="w-full bg-slate-950 border border-slate-800 rounded-2xl p-5 text-xs font-mono text-slate-400 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                                            rows="4"
+                                        ></textarea>
+                                        
+                                        <div class="flex justify-end">
+                                            <button @click="saveTask(task)" class="bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white text-[9px] font-bold px-6 py-2.5 rounded-xl border border-indigo-500/20 transition-all uppercase tracking-widest">
+                                                Save Changes
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </div>
             </template>
+
+            <div 
+                x-show="viewMode === 'nexus'" 
+                class="h-full w-full bg-slate-950 relative overflow-hidden"
+                style="display: none;" 
+                :class="{ 'block': viewMode === 'nexus' }"
+            >
+            <div x-show="nexusLoading" 
+                x-transition:enter="transition ease-out duration-300"
+                x-transition:leave="transition ease-in duration-500"
+                class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl">
+                <div class="flex flex-col items-center gap-6">
+                        <div class="relative w-20 h-20">
+                            <div class="absolute inset-0 border-4 border-indigo-500/10 rounded-full"></div>
+                            <div class="absolute inset-0 border-4 border-t-indigo-500 rounded-full animate-spin"></div>
+                            <div class="absolute inset-4 border-2 border-emerald-500/20 border-b-emerald-500 rounded-full animate-[spin_2s_linear_infinite_reverse]"></div>
+                        </div>
+                        <div class="text-center space-y-2">
+                            <p class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] animate-pulse">Initializing Nexus Engine</p>
+                            <p class="text-[8px] font-mono text-slate-500 uppercase tracking-widest">Synthesizing Cross-Report Relationships...</p>
+                        </div>
+                </div>
+            </div>
+                    <div class="absolute top-6 right-6 z-20 w-64 md:w-80 group">
+                        <div class="relative">
+                            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors"></i>
+                            <input 
+                                type="text" 
+                                x-model="searchQuery" 
+                                placeholder="Search Nexus (e.g. 'China' or 'Adani')..." 
+                                class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
+                            >
+                        </div>
+                        
+                        <p class="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-2 px-2 text-right">
+                            Auto-panning to Intelligence Nodes
+                        </p>
+                    </div>
+                    <div class="absolute top-6 left-6 z-10 bg-slate-900/50 backdrop-blur border border-slate-800 p-4 rounded-2xl pointer-events-none">
+                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Nexus Legend</h3>
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-indigo-500"></span> <span class="text-[9px] text-slate-400 uppercase">Reports</span></div>
+                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span class="text-[9px] text-slate-400 uppercase">Locations</span></div>
+                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-500"></span> <span class="text-[9px] text-slate-400 uppercase">People</span></div>
+                        </div>
+                    </div>
+                    
+                    <div id="nexus-canvas" class="h-full w-full"></div>
+            </div>
 
             <template x-if="!activeItem">
                 <div class="h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-800 gap-6">
