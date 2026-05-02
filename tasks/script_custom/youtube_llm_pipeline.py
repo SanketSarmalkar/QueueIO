@@ -2,11 +2,12 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.proxies import WebshareProxyConfig
 import requests
 import yt_dlp
+from supadata import Supadata
 from datetime import datetime, timezone
 import time
 import concurrent.futures
 import logging
-from tasks.config import TASK_CONFIGS, MONGO_COLLECTIONS, GEN_AI_CLIENT, AI_MODEL, DOCUMENT, DOCUMENT_MAP, EXTRA_DOCUMENT_ARGS, PLAYLIST_FETCH_LIMIT, YOUTUBE_PLAYLIST_URL_TEMPLATE, YOUTUBE_PLAYLIST_IDS, EXECUTOR_WORKERS, INBETWEEN_TASK_SLEEP, RAPID_API_KEY, RAPID_API_HOST, RAPID_API_URL
+from tasks.config import TASK_CONFIGS, MONGO_COLLECTIONS, GEN_AI_CLIENT, AI_MODEL, DOCUMENT, DOCUMENT_MAP, EXTRA_DOCUMENT_ARGS, PLAYLIST_FETCH_LIMIT, YOUTUBE_PLAYLIST_URL_TEMPLATE, YOUTUBE_PLAYLIST_IDS, EXECUTOR_WORKERS, INBETWEEN_TASK_SLEEP, RAPID_API_KEY, RAPID_API_HOST, RAPID_API_URL, SUPADATA_API_KEY
 
 class YouTubeLLMPipeline:
     def __init__(self, task_key="summarize"):
@@ -24,6 +25,7 @@ class YouTubeLLMPipeline:
         self.rapid_api_key = RAPID_API_KEY
         self.rapid_api_host = RAPID_API_HOST
         self.rapid_api_url = RAPID_API_URL
+        self.supadata = Supadata(api_key=SUPADATA_API_KEY)
 
     def check_id_if_present(self, video_id):
         """Checks if a video ID is already processed."""
@@ -112,6 +114,19 @@ class YouTubeLLMPipeline:
             logging.error(f"RapidAPI request failed for {video_id}: {str(e)}")
             return None
 
+    def _fetch_from_supadata(self, video_id):
+        """Method 3: Supadata (Using the instance client)"""
+        try:
+            logging.info(f"Attempting Supadata fallback for video {video_id}...")
+            response = self.supadata.youtube.transcript(video_id=video_id, text=True)
+            
+            if response and hasattr(response, 'content'):
+                return response.content
+            return None
+        except Exception as e:
+            logging.error(f"Supadata failed for {video_id}: {e}")
+            return None
+
     def get_transcript(self, video):
         """Orchestrator: Tries Library first, then API fallback."""
         if not video or 'id' not in video:
@@ -124,8 +139,12 @@ class YouTubeLLMPipeline:
             return None
         
         transcript = self._fetch_from_library(video_id)
+        
         if not transcript:
             transcript = self._fetch_from_api(video_id)
+
+        if not transcript:
+            transcript = self._fetch_from_supadata(video_id)
             
         if transcript:
             logging.info(f"Successfully obtained transcript for {video_id}")

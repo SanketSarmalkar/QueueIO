@@ -69,3 +69,5 @@ SLACK_WEBHOOK_URL = os.getenv('SLACK_WEBHOOK_URL', '')
 RAPID_API_KEY = os.getenv('RAPID_API_KEY', '')
 RAPID_API_HOST = os.getenv('RAPID_API_HOST', '')
 RAPID_API_URL = os.getenv('RAPID_API_URL', '')
+
+SUPADATA_API_KEY = os.getenv('SUPADATA_API_KEY', '')
