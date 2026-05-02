@@ -5,12 +5,13 @@ import json
 import django
 from pymongo import MongoClient
 from google import genai
+from django.http import JsonResponse
 
 sys.path.append(os.getcwd())
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 django.setup()
 
-def backfill_entities():
+def backfill_entities(request=None):
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     
     db_password = os.getenv('DB_PASSWORD').replace('"', '')
@@ -44,7 +45,6 @@ def backfill_entities():
                     config={"response_mime_type": "application/json"}
                 )
                 
-                # Parse and Save
                 entity_data = json.loads(response.text)
                 collection.update_one(
                     {"_id": doc["_id"]},
@@ -55,6 +55,11 @@ def backfill_entities():
                 success = True
                 time.sleep(5) 
 
+                return JsonResponse({
+                    "status": "success",
+                    "message": f"Backfilled entities for {len(reports)} reports. Check console for details."
+                })
+
             except Exception as e:
                 if "429" in str(e):
                     print("🛑 Quota hit. Sleeping for 45 seconds...")
@@ -63,6 +68,10 @@ def backfill_entities():
                 else:
                     print(f"❌ Critical Error on {doc['_id']}: {e}")
                     break
+                return JsonResponse({
+                    "status": "error",
+                    "message": f"Failed to backfill entities for {doc['_id']}. Check console for details."
+                })
 
 if __name__ == "__main__":
     backfill_entities()
