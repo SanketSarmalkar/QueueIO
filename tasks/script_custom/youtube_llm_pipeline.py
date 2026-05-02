@@ -35,27 +35,7 @@ class YouTubeLLMPipeline:
         
         existing = self.collection.find_one({"key": video_id})
         return existing is not None
-
-    # def get_transcript(self, video):
-    #     """Generic transcript fetcher with language fallback."""
-    #     if not video or 'id' not in video:
-    #         logging.warning("Invalid video data provided for transcript fetching.")
-    #         return None
-    #     video_id = video['id']
-    #     if video_id is None or video_id.strip() == "" or self.check_id_if_present(video_id):
-    #         logging.info(f"Skipping transcript fetch for {video_id}: ID is missing or already processed.")
-    #         return None
-
-    #     try:
-    #         ytt_api = YouTubeTranscriptApi()
-    #         transcript_list = ytt_api.list(video_id)
-    #         transcript = transcript_list.find_generated_transcript(['hi', 'en'])
-    #         logging.info(f"Transcript fetched for video ID {video_id} with language {transcript.language_code}")
-    #         return " ".join(snippet.text for snippet in transcript.fetch())
-    #     except Exception as e:
-    #         logging.error(f"Transcript fetch failed for {video_id}: {e}")
-    #         return None 
-
+    
     def _fetch_from_library(self, video_id):
         """Method 1: Using youtube_transcript_api (PIP)"""
         try:
@@ -113,7 +93,7 @@ class YouTubeLLMPipeline:
         except Exception as e:
             logging.error(f"RapidAPI request failed for {video_id}: {str(e)}")
             return None
-
+        
     def _fetch_from_supadata(self, video_id):
         """Method 3: Supadata (Using the instance client)"""
         try:
@@ -138,8 +118,9 @@ class YouTubeLLMPipeline:
             logging.info(f"Skipping {video_id}: Already processed.")
             return None
         
+        transcript = None
         transcript = self._fetch_from_library(video_id)
-        
+
         if not transcript:
             transcript = self._fetch_from_api(video_id)
 
