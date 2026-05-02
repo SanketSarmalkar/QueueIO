@@ -5,9 +5,7 @@ import json
 import django
 from pymongo import MongoClient
 from google import genai
-from google.api_core import exceptions # Important for catching 429s
 
-# Initialize Path and Django
 sys.path.append(os.getcwd())
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 django.setup()
@@ -15,7 +13,6 @@ django.setup()
 def backfill_entities():
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     
-    # Mongo Connection logic
     db_password = os.getenv('DB_PASSWORD').replace('"', '')
     db_user = os.getenv('DB_USER').replace('"', '')
     db_url = os.getenv('DB_URL').replace('"', '')
@@ -23,7 +20,6 @@ def backfill_entities():
     mongo_client = MongoClient(uri)
     collection = mongo_client["queuei"]["mass_records"]
 
-    # Only grab documents that don't have entities yet
     reports = list(collection.find({"entities": {"$exists": False}}))
     print(f"🚀 Found {len(reports)} reports needing analysis.")
 
@@ -38,13 +34,12 @@ def backfill_entities():
         {doc.get('value')}
         """
         
-        # Retry Loop for 429 errors
         success = False
         retries = 0
         while not success and retries < 3:
             try:
                 response = client.models.generate_content(
-                    model="gemini-3.1-flash-lite-preview", # Use standard Flash for higher limits
+                    model="gemini-3.1-flash-lite-preview",
                     contents=prompt,
                     config={"response_mime_type": "application/json"}
                 )
@@ -58,7 +53,6 @@ def backfill_entities():
                 print(f"✅ Extracted entities for {doc['_id']}")
                 
                 success = True
-                # MANDATORY DELAY: Keep it to ~12 requests per minute to be safe
                 time.sleep(5) 
 
             except Exception as e:
@@ -68,7 +62,7 @@ def backfill_entities():
                     retries += 1
                 else:
                     print(f"❌ Critical Error on {doc['_id']}: {e}")
-                    break # Skip to next doc on non-quota errors
+                    break
 
 if __name__ == "__main__":
     backfill_entities()
