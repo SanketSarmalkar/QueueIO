@@ -47,7 +47,7 @@ def dashboard(request):
             'id': str(item['_id']),
             'category': item.get('category', 'queuei'),
             'key': item.get('key', ''),
-            'title': item.get('a', 'Untitled Record').split('|')[0].strip(),
+            'title': (item.get('a') or 'Untitled Record').split('|')[0].strip(),
             # 'value': item.get('value', ''),
             'date_display': date_display,
             'time_display': time_display,
