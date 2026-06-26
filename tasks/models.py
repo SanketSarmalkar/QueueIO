@@ -35,3 +35,12 @@ class CronJob(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class TranscriptCache(models.Model):
+    video_id = models.CharField(max_length=50, unique=True, db_index=True)
+    transcript = models.TextField()
+    cached_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.video_id
