@@ -394,12 +394,20 @@
                     </button>
                 </div>
 
-                {% if user.is_superuser %} 
-                <button @click="viewMode = 'command'" 
+                {% if user.is_superuser %}
+                <button @click="viewMode = 'command'"
                         :class="viewMode === 'command' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white'"
                         class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
                     Command Center
                 </button>
+                <a href="{% url 'cron_manager' %}"
+                   class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-clock text-[9px]"></i> Cron
+                </a>
+                <a href="{% url 'settings' %}"
+                   class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-sliders text-[9px]"></i> Settings
+                </a>
                 {% endif %}
             </nav>
 

@@ -1,0 +1,325 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cron Manager — Queuei</title>
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen font-sans" x-data="cronApp" x-init="init()">
+
+    {{ jobs_json|json_script:"jobs-data" }}
+    {{ task_keys_json|json_script:"task-keys-data" }}
+
+    <!-- Header -->
+    <header class="h-14 bg-slate-900 flex items-center px-6 justify-between shadow-lg border-b border-slate-800 sticky top-0 z-50">
+        <div class="flex items-center gap-3">
+            <a href="/" class="flex items-center gap-3">
+                <img src="{% static 'favicon.png' %}" alt="Logo" class="w-9 h-9 rounded-lg object-cover border border-slate-700/50">
+                <span class="font-black tracking-tighter text-lg uppercase text-white">Queue <span class="text-indigo-400">IO</span></span>
+            </a>
+        </div>
+        <div class="flex items-center gap-6">
+            <nav class="flex items-center gap-1">
+                <a href="/" class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all">Dashboard</a>
+                <span class="px-3 py-1 rounded text-[10px] font-bold uppercase bg-slate-800 text-indigo-400 flex items-center gap-1">
+                    <i class="fa-solid fa-clock text-[9px]"></i> Cron
+                </span>
+                <a href="{% url 'settings' %}" class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-sliders text-[9px]"></i> Settings
+                </a>
+            </nav>
+            <a href="{% url 'logout' %}" class="flex items-center gap-2 text-slate-400 hover:text-red-400 transition-colors text-[10px] font-mono uppercase border-l border-slate-700 pl-6">
+                <i class="fa-solid fa-power-off"></i> Logout
+            </a>
+        </div>
+    </header>
+
+    <div class="max-w-5xl mx-auto px-6 py-10">
+
+        <!-- Page title -->
+        <div class="mb-8 flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-black uppercase tracking-tighter text-white">Cron Manager</h1>
+                <p class="text-slate-500 text-xs font-mono mt-1">Schedule pipeline tasks to run automatically. Uses UTC time. Changes take effect immediately.</p>
+            </div>
+            <button @click="openCreate()"
+                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all">
+                <i class="fa-solid fa-plus"></i> New Job
+            </button>
+        </div>
+
+        <!-- Toast -->
+        <div x-show="toast" x-transition
+             :class="toast && toast.type === 'error' ? 'bg-red-900/80 border-red-700 text-red-200' : 'bg-emerald-900/80 border-emerald-700 text-emerald-200'"
+             class="fixed top-4 right-4 z-50 border px-5 py-3 rounded-lg text-xs font-bold shadow-2xl backdrop-blur"
+             x-text="toast ? toast.msg : ''">
+        </div>
+
+        <!-- Empty state -->
+        <div x-show="jobs.length === 0" class="text-center py-20">
+            <i class="fa-solid fa-clock text-slate-700 text-5xl mb-4 block"></i>
+            <p class="text-slate-500 text-sm font-mono">No cron jobs yet. Create one to schedule a pipeline task.</p>
+        </div>
+
+        <!-- Jobs table -->
+        <div x-show="jobs.length > 0" class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr class="border-b border-slate-800 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+                        <th class="text-left px-5 py-3">Name</th>
+                        <th class="text-left px-4 py-3">Task</th>
+                        <th class="text-left px-4 py-3">Schedule (UTC)</th>
+                        <th class="text-left px-4 py-3">Last Run</th>
+                        <th class="text-left px-4 py-3">Status</th>
+                        <th class="text-right px-5 py-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="job in jobs" :key="job.id">
+                        <tr class="border-b border-slate-800/50 last:border-b-0 hover:bg-slate-800/30 transition-colors">
+                            <td class="px-5 py-4 font-bold text-white" x-text="job.name"></td>
+                            <td class="px-4 py-4">
+                                <span class="bg-indigo-500/20 text-indigo-300 font-mono text-[10px] px-2 py-0.5 rounded" x-text="job.task_key"></span>
+                            </td>
+                            <td class="px-4 py-4 font-mono text-slate-300" x-text="job.cron_expression"></td>
+                            <td class="px-4 py-4 text-slate-500" x-text="job.last_run_at ? fmtDate(job.last_run_at) : '—'"></td>
+                            <td class="px-4 py-4">
+                                <button @click="toggleJob(job)"
+                                        :class="job.is_active ? 'bg-emerald-500/20 text-emerald-400 hover:bg-red-500/10 hover:text-red-400' : 'bg-slate-700/50 text-slate-500 hover:bg-emerald-500/10 hover:text-emerald-400'"
+                                        class="text-[10px] font-black uppercase px-2.5 py-1 rounded transition-all"
+                                        x-text="job.is_active ? 'Active' : 'Paused'">
+                                </button>
+                            </td>
+                            <td class="px-5 py-4">
+                                <div class="flex items-center justify-end gap-1">
+                                    <button @click="runNow(job)"
+                                            title="Run now"
+                                            class="text-slate-500 hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-800">
+                                        <i class="fa-solid fa-play text-[10px]"></i>
+                                    </button>
+                                    <button @click="openEdit(job)"
+                                            title="Edit"
+                                            class="text-slate-500 hover:text-indigo-400 transition-colors px-2 py-1 rounded hover:bg-slate-800">
+                                        <i class="fa-solid fa-pen-to-square text-[10px]"></i>
+                                    </button>
+                                    <button @click="deleteJob(job)"
+                                            title="Delete"
+                                            class="text-slate-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-slate-800">
+                                        <i class="fa-solid fa-trash text-[10px]"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Cron reference -->
+        <div class="mt-8 bg-slate-900/50 border border-slate-800 rounded-xl p-5">
+            <h3 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-3 flex items-center gap-2">
+                <i class="fa-solid fa-circle-info"></i> Cron Expression Reference
+            </h3>
+            <div class="grid grid-cols-2 gap-2 md:grid-cols-3">
+                <template x-for="ex in examples" :key="ex.expr">
+                    <div class="bg-slate-800/50 rounded-lg px-3 py-2 cursor-pointer hover:bg-slate-800 transition-colors"
+                         @click="form.cron_expression = ex.expr">
+                        <div class="font-mono text-[11px] text-indigo-300 mb-0.5" x-text="ex.expr"></div>
+                        <div class="text-[10px] text-slate-500" x-text="ex.label"></div>
+                    </div>
+                </template>
+            </div>
+            <p class="text-[10px] text-slate-600 mt-3 font-mono">Format: <span class="text-slate-400">minute hour day month weekday</span> — click an example to copy it into the form.</p>
+        </div>
+    </div>
+
+    <!-- Create / Edit Modal -->
+    <div x-show="showModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div @click.outside="showModal = false"
+             class="bg-slate-900 border border-slate-700 rounded-2xl p-8 w-full max-w-md shadow-2xl">
+            <h3 class="text-sm font-black uppercase tracking-wider text-white mb-6 flex items-center gap-2">
+                <i class="fa-solid fa-clock text-indigo-400"></i>
+                <span x-text="editingId ? 'Edit Job' : 'New Cron Job'"></span>
+            </h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Name</label>
+                    <input x-model="form.name" type="text"
+                           class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                           placeholder="Daily summarize">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Task Key</label>
+                    <select x-model="form.task_key"
+                            class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none">
+                        <option value="">— select task —</option>
+                        <template x-for="key in taskKeys" :key="key">
+                            <option :value="key" x-text="key"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Cron Expression <span class="text-slate-600 normal-case font-normal">(UTC)</span></label>
+                    <input x-model="form.cron_expression" type="text"
+                           class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none"
+                           placeholder="0 8 * * *">
+                    <p class="text-[10px] text-slate-600 mt-1 font-mono">minute hour day month weekday</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <label class="text-[10px] font-bold uppercase text-slate-400">Active</label>
+                    <button @click="form.is_active = !form.is_active"
+                            :class="form.is_active ? 'bg-indigo-600' : 'bg-slate-700'"
+                            class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors">
+                        <span :class="form.is_active ? 'translate-x-4' : 'translate-x-1'"
+                              class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform"></span>
+                    </button>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button @click="saveJob()"
+                        :disabled="!form.name || !form.task_key || !form.cron_expression"
+                        class="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase tracking-widest py-2.5 rounded-lg transition-all">
+                    <span x-text="editingId ? 'Update' : 'Create'"></span>
+                </button>
+                <button @click="showModal = false"
+                        class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[10px] font-bold uppercase py-2.5 rounded-lg transition-all">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CSRF = '{{ csrf_token }}';
+
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('cronApp', () => ({
+                jobs: [],
+                taskKeys: [],
+                showModal: false,
+                editingId: null,
+                form: { name: '', task_key: '', cron_expression: '', is_active: true },
+                toast: null,
+                examples: [
+                    { expr: '0 */6 * * *',  label: 'Every 6 hours' },
+                    { expr: '0 8 * * *',    label: 'Daily at 08:00 UTC' },
+                    { expr: '0 0 * * *',    label: 'Daily at midnight' },
+                    { expr: '0 0 * * 0',    label: 'Weekly (Sunday)' },
+                    { expr: '0 0 1 * *',    label: 'Monthly (1st)' },
+                    { expr: '*/30 * * * *', label: 'Every 30 minutes' },
+                ],
+
+                init() {
+                    const jobsEl = document.getElementById('jobs-data');
+                    const keysEl = document.getElementById('task-keys-data');
+                    this.jobs = jobsEl ? JSON.parse(jobsEl.textContent) : [];
+                    this.taskKeys = keysEl ? JSON.parse(keysEl.textContent) : [];
+                },
+
+                fmtDate(iso) {
+                    if (!iso) return '—';
+                    const d = new Date(iso);
+                    return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+                },
+
+                openCreate() {
+                    this.editingId = null;
+                    this.form = { name: '', task_key: '', cron_expression: '', is_active: true };
+                    this.showModal = true;
+                },
+
+                openEdit(job) {
+                    this.editingId = job.id;
+                    this.form = {
+                        name: job.name,
+                        task_key: job.task_key,
+                        cron_expression: job.cron_expression,
+                        is_active: job.is_active,
+                    };
+                    this.showModal = true;
+                },
+
+                async saveJob() {
+                    const action = this.editingId ? 'update' : 'create';
+                    const body = { action, ...this.form };
+                    if (this.editingId) body.id = this.editingId;
+
+                    const resp = await fetch('/cron/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                        body: JSON.stringify(body),
+                    });
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        if (action === 'create') {
+                            this.jobs.unshift(data.job);
+                        } else {
+                            const idx = this.jobs.findIndex(j => j.id === this.editingId);
+                            if (idx >= 0) this.jobs[idx] = data.job;
+                        }
+                        this.showModal = false;
+                        this.showToast(action === 'create' ? 'Job created.' : 'Job updated.');
+                    } else {
+                        this.showToast('Error: ' + data.message, 'error');
+                    }
+                },
+
+                async toggleJob(job) {
+                    const resp = await fetch('/cron/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                        body: JSON.stringify({ action: 'toggle', id: job.id }),
+                    });
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        job.is_active = data.is_active;
+                        this.showToast(data.is_active ? 'Job activated.' : 'Job paused.');
+                    } else {
+                        this.showToast('Error: ' + data.message, 'error');
+                    }
+                },
+
+                async deleteJob(job) {
+                    if (!confirm(`Delete "${job.name}"?`)) return;
+                    const resp = await fetch('/cron/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                        body: JSON.stringify({ action: 'delete', id: job.id }),
+                    });
+                    if (resp.ok) {
+                        this.jobs = this.jobs.filter(j => j.id !== job.id);
+                        this.showToast('Job deleted.');
+                    } else {
+                        const data = await resp.json();
+                        this.showToast('Error: ' + data.message, 'error');
+                    }
+                },
+
+                async runNow(job) {
+                    const resp = await fetch('/cron/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+                        body: JSON.stringify({ action: 'run_now', id: job.id, task_key: job.task_key }),
+                    });
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        this.showToast(data.message);
+                    } else {
+                        this.showToast('Error: ' + data.message, 'error');
+                    }
+                },
+
+                showToast(msg, type = 'success') {
+                    this.toast = { msg, type };
+                    setTimeout(() => this.toast = null, 3500);
+                },
+            }));
+        });
+    </script>
+</body>
+</html>

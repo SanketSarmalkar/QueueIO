@@ -11,4 +11,6 @@ urlpatterns = [
     path('intel-chat/', views.intel_chat_view, name='intel_chat'),
     path('command-center/', views.command_center_view, name='command_center'),
     path('nexus-data/', views.get_nexus_graph, name='nexus_data'),
+    path('settings/', views.settings_view, name='settings'),
+    path('cron/', views.cron_manager_view, name='cron_manager'),
 ]

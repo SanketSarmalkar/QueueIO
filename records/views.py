@@ -14,8 +14,19 @@ import json
 from bson import ObjectId
 from pymongo.server_api import ServerApi
 
-from tasks.models import TaskConfiguration, GlobalSetting
+import threading
+from tasks.models import TaskConfiguration, GlobalSetting, CronJob
 from django.contrib.auth.decorators import user_passes_test
+
+KNOWN_SETTINGS = [
+    {'key': 'YOUTUBE_PLAYLIST_IDS',  'description': 'Comma-separated YouTube playlist IDs to monitor', 'env_key': 'YOUTUBE_PLAYLIST_IDS'},
+    {'key': 'PLAYLIST_FETCH_LIMIT',  'description': 'Max recent videos to fetch per playlist per pipeline run', 'env_key': 'PLAYLIST_FETCH_LIMIT'},
+    {'key': 'AI_MODEL',              'description': 'Gemini model for LLM inference (e.g. gemini-2.0-flash)', 'env_key': 'AI_MODEL'},
+    {'key': 'EXECUTOR_WORKERS',      'description': 'Concurrent thread pool workers for video processing', 'env_key': 'EXECUTOR_WORKERS'},
+    {'key': 'INBETWEEN_TASK_SLEEP',  'description': 'Seconds to pause between thread pool batches', 'env_key': 'INBETWEEN_TASK_SLEEP'},
+    {'key': 'EXTRA_DOCUMENT_ARGS',   'description': 'JSON object of extra fields injected into every MongoDB document', 'env_key': 'EXTRA_DOCUMENT_ARGS'},
+]
+KNOWN_KEYS = {s['key'] for s in KNOWN_SETTINGS}
 
 
 def custom_404(request, exception):
@@ -277,3 +288,125 @@ def get_nexus_graph(request):
                 })
 
     return JsonResponse({"nodes": nodes, "links": links})
+
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def settings_view(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            action = data.get('action')
+
+            if action == 'upsert':
+                key = data['key'].strip().upper()
+                obj, _ = GlobalSetting.objects.get_or_create(key=key)
+                obj.value = data.get('value', '')
+                obj.description = data.get('description', obj.description)
+                obj.save()
+                return JsonResponse({'status': 'success', 'setting': {
+                    'id': obj.id, 'key': obj.key,
+                    'value': obj.value, 'description': obj.description,
+                    'is_known': obj.key in KNOWN_KEYS,
+                }})
+
+            elif action == 'delete':
+                GlobalSetting.objects.filter(key=data['key']).delete()
+                return JsonResponse({'status': 'success'})
+
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+    # GET: ensure all known settings exist (seed from env var if missing)
+    for s in KNOWN_SETTINGS:
+        GlobalSetting.objects.get_or_create(
+            key=s['key'],
+            defaults={'value': os.getenv(s['env_key'], ''), 'description': s['description']},
+        )
+
+    settings_list = [
+        {'id': s.id, 'key': s.key, 'value': s.value,
+         'description': s.description, 'is_known': s.key in KNOWN_KEYS}
+        for s in GlobalSetting.objects.all().order_by('key')
+    ]
+    return render(request, 'settings.html', {'settings_json': settings_list})
+
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def cron_manager_view(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            action = data.get('action')
+
+            if action == 'create':
+                job = CronJob.objects.create(
+                    name=data['name'].strip(),
+                    task_key=data['task_key'].strip(),
+                    cron_expression=data['cron_expression'].strip(),
+                    is_active=data.get('is_active', True),
+                )
+                from tasks.scheduler import load_jobs
+                load_jobs()
+                return JsonResponse({'status': 'success', 'job': _serialize_job(job)})
+
+            elif action == 'update':
+                job = CronJob.objects.get(id=data['id'])
+                job.name = data.get('name', job.name).strip()
+                job.task_key = data.get('task_key', job.task_key).strip()
+                job.cron_expression = data.get('cron_expression', job.cron_expression).strip()
+                job.is_active = data.get('is_active', job.is_active)
+                job.save()
+                from tasks.scheduler import load_jobs
+                load_jobs()
+                return JsonResponse({'status': 'success', 'job': _serialize_job(job)})
+
+            elif action == 'toggle':
+                job = CronJob.objects.get(id=data['id'])
+                job.is_active = not job.is_active
+                job.save()
+                from tasks.scheduler import load_jobs
+                load_jobs()
+                return JsonResponse({'status': 'success', 'is_active': job.is_active})
+
+            elif action == 'delete':
+                CronJob.objects.filter(id=data['id']).delete()
+                from tasks.scheduler import load_jobs
+                load_jobs()
+                return JsonResponse({'status': 'success'})
+
+            elif action == 'run_now':
+                from tasks.scheduler import run_pipeline_job
+                t = threading.Thread(
+                    target=run_pipeline_job,
+                    args=[data['task_key'], data['id']],
+                    daemon=True,
+                )
+                t.start()
+                return JsonResponse({'status': 'success', 'message': f"Pipeline '{data['task_key']}' triggered"})
+
+        except CronJob.DoesNotExist:
+            return JsonResponse({'status': 'error', 'message': 'Job not found'}, status=404)
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+    # GET
+    jobs = [_serialize_job(j) for j in CronJob.objects.all().order_by('-created_at')]
+    task_keys = list(TaskConfiguration.objects.filter(is_active=True).values_list('task_key', flat=True))
+    return render(request, 'cron_manager.html', {
+        'jobs_json': jobs,
+        'task_keys_json': task_keys,
+    })
+
+
+def _serialize_job(job):
+    return {
+        'id': job.id,
+        'name': job.name,
+        'task_key': job.task_key,
+        'cron_expression': job.cron_expression,
+        'is_active': job.is_active,
+        'last_run_at': job.last_run_at.isoformat() if job.last_run_at else None,
+        'created_at': job.created_at.isoformat() if job.created_at else None,
+    }

@@ -17,3 +17,15 @@ class GlobalSetting(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class CronJob(models.Model):
+    name = models.CharField(max_length=100)
+    task_key = models.CharField(max_length=50, help_text="Must match an active TaskConfiguration key")
+    cron_expression = models.CharField(max_length=100, help_text="5-part cron: minute hour day month weekday")
+    is_active = models.BooleanField(default=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
