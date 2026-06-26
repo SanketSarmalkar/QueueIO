@@ -41,6 +41,11 @@
                 },
                 items: [],
                 tasks: [],
+                stacks: [],
+                totalCount: 0,
+                hasMore: false,
+                nextOffset: 50,
+                loadingMore: false,
                 hoverNode: null,
                 nexusLoading: false,
     
@@ -48,9 +53,26 @@
                     try {
                         const itemsData = document.getElementById('items-data');
                         const tasksData = document.getElementById('tasks-data');
-                        
+                        const stacksData = document.getElementById('stacks-data');
+
                         this.items = itemsData ? JSON.parse(itemsData.textContent) : [];
                         this.tasks = tasksData ? JSON.parse(tasksData.textContent) : [];
+                        this.stacks = stacksData ? JSON.parse(stacksData.textContent) : [];
+                        this.totalCount = {{ total_count }};
+                        this.hasMore = {{ has_more }};
+                        this.nextOffset = {{ next_offset }};
+
+                        this.$nextTick(() => {
+                            const container = document.getElementById('sidebar-scroll');
+                            const sentinel = document.getElementById('scroll-sentinel');
+                            if (container && sentinel) {
+                                new IntersectionObserver((entries) => {
+                                    if (entries[0].isIntersecting && this.hasMore && !this.loadingMore) {
+                                        this.loadMoreItems();
+                                    }
+                                }, { root: container, rootMargin: '100px' }).observe(sentinel);
+                            }
+                        });
                         
                         this.$watch('searchQuery', (value) => {
                             if (this.viewMode !== 'nexus' || !NEXUS_ENGINE) return;
@@ -115,16 +137,20 @@
                     localStorage.setItem('darkMode', this.darkMode);
                 },
     
-                get playlistStacks() {
-                    const groups = {};
-                    this.items.forEach(item => {
-                        const pid = item.playlist_id || 'unassigned';
-                        if (!groups[pid]) {
-                            groups[pid] = { id: pid, count: 0, title: item.playlist_title || 'General Archive' };
-                        }
-                        groups[pid].count++;
-                    });
-                    return Object.values(groups);
+                async loadMoreItems() {
+                    if (!this.hasMore || this.loadingMore) return;
+                    this.loadingMore = true;
+                    try {
+                        const resp = await fetch(`/records/?offset=${this.nextOffset}`);
+                        const data = await resp.json();
+                        this.items.push(...data.items);
+                        this.hasMore = data.has_more;
+                        this.nextOffset = data.next_offset;
+                    } catch (e) {
+                        console.error('Failed to load more records', e);
+                    } finally {
+                        this.loadingMore = false;
+                    }
                 },
     
                 get filteredItems() {
@@ -342,6 +368,7 @@
 >
     {{ items_raw|json_script:"items-data" }}
     {{ tasks_json|json_script:"tasks-data" }}
+    {{ stacks_json|json_script:"stacks-data" }}
     <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between shadow-lg z-50 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
             <button @click="sidebarOpen = !sidebarOpen" class="p-2 -ml-2 text-slate-400 hover:text-white transition-all">
@@ -441,11 +468,11 @@
                 </div>
             </div>
             
-            <div class="flex-1 overflow-y-auto custom-scrollbar">
+            <div id="sidebar-scroll" class="flex-1 overflow-y-auto custom-scrollbar">
                 <template x-for="item in filteredItems" :key="item.key">
                     <div @click="selectItem(item.id)"
-                         :class="selectedId === item.id 
-                            ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600') 
+                         :class="selectedId === item.id
+                            ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600')
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'"
                          class="p-4 cursor-pointer border-b border-slate-50 dark:border-slate-800 transition-all duration-200 group">
                          <div class="flex justify-between items-start mb-1">
@@ -458,6 +485,10 @@
                         <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-400 leading-snug line-clamp-2" x-text="item.title"></h4>
                     </div>
                 </template>
+                <div id="scroll-sentinel" class="h-1"></div>
+                <div x-show="loadingMore" class="py-3 text-center">
+                    <span class="text-[9px] font-mono text-slate-500 dark:text-slate-600 animate-pulse uppercase tracking-widest">Loading...</span>
+                </div>
             </div>
         </aside>
 
@@ -540,25 +571,27 @@
             
             <template x-if="viewMode === 'stacks'">
                 <div class="p-8 max-w-7xl mx-auto">
-                    <h2 class="text-2xl font-black text-slate-800 dark:text-white mb-8 uppercase tracking-tight">Intelligence Stacks</h2>
-                    
+                    <div class="flex items-baseline gap-3 mb-8">
+                        <h2 class="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Intelligence Stacks</h2>
+                        <span class="text-[10px] font-mono text-slate-500 uppercase" x-text="totalCount + ' total reports'"></span>
+                    </div>
+
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <template x-for="stack in playlistStacks" :key="stack.id">
-                            <div @click="openStack(stack.id)" 
+                        <template x-for="stack in stacks" :key="stack.id">
+                            <div @click="openStack(stack.id)"
                                  class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 cursor-pointer hover:border-indigo-500 transition-all hover:shadow-2xl hover:-translate-y-1">
-                                
+
                                 <div class="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-4 group-hover:scale-110 transition-transform">
                                     <i class="fa-solid fa-folder-tree text-xl"></i>
                                 </div>
-        
-                                <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200 mb-1" x-text="stack.title"></h3> 
+
+                                <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200 mb-1" x-text="stack.title"></h3>
                                 <div class="flex items-center justify-between mt-4">
                                     <span class="text-[9px] font-mono text-slate-500 uppercase" x-text="'ID: ' + stack.id"></span>
-                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
-                                </div>
-                                <div class="flex items-center justify-between mt-4">
-                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
                                     <span class="text-[10px] font-mono text-indigo-500 font-bold">OPEN STACK <i class="fa-solid fa-arrow-right ml-1"></i></span>
+                                </div>
+                                <div class="mt-2">
+                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
                                 </div>
                             </div>
                         </template>

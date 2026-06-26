@@ -1,10 +1,7 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import logout
-from pymongo import MongoClient
-from django.conf import settings
 from django.contrib.auth.forms import UserCreationForm
-from django.contrib.auth import login
 from django.contrib import messages
 from django.http import JsonResponse
 from datetime import datetime
@@ -12,7 +9,6 @@ from google import genai
 import os
 import json
 from bson import ObjectId
-from pymongo.server_api import ServerApi
 
 import threading
 from tasks.models import TaskConfiguration, GlobalSetting, CronJob
@@ -39,42 +35,46 @@ def dashboard(request):
         return render(request, 'access_denied.html')
 
     collection = get_db_collection()
-    
-    records = list(collection.find({}, {'value': 0, 'embedding': 0}).sort('createdat', -1))
-    
-    formatted_items = []
-    for item in records:
-        created_at = item.get('createdat')
-        date_display = "N/A"
-        time_display = "N/A"
-        if created_at:
-            if isinstance(created_at, str):
-                created_at = datetime.fromisoformat(created_at)
-            if hasattr(created_at, "strftime"):
-                date_display = created_at.strftime("%b %d, %Y")
-            if hasattr(created_at, "strftime"):
-                time_display = created_at.strftime('%I:%M %p')
-        formatted_items.append({
-            'id': str(item['_id']),
-            'category': item.get('category', 'queuei'),
-            'key': item.get('key', ''),
-            'title': (item.get('a') or 'Untitled Record').split('|')[0].strip(),
-            # 'value': item.get('value', ''),
-            'date_display': date_display,
-            'time_display': time_display,
-            'playlist_id': item.get('playlist_id', None),
-            'playlist_title': item.get('playlist_title', item.get('playlist_id', 'General Archive'))
-        })
 
-    tasks_query = TaskConfiguration.objects.all().values(
+    # Stack counts — one aggregation, no full scan
+    stack_pipeline = [
+        {"$group": {"_id": "$playlist_id", "count": {"$sum": 1}, "title": {"$first": "$playlist_title"}}},
+        {"$sort": {"count": -1}},
+    ]
+    stacks_json = [
+        {"id": s["_id"] or "unassigned", "count": s["count"], "title": s.get("title") or "General Archive"}
+        for s in collection.aggregate(stack_pipeline)
+    ]
+
+    total = collection.estimated_document_count()
+    records = list(collection.find({}, {'value': 0, 'embedding': 0}).sort('createdat', -1).limit(_PAGE_SIZE))
+    formatted_items = [_format_record(r) for r in records]
+
+    tasks_list = list(TaskConfiguration.objects.all().values(
         'id', 'task_key', 'display_name', 'prompt_template', 'target_collection', 'is_active'
-    )
-    tasks_list = list(tasks_query)
-        
+    ))
+
     return render(request, 'dashboard.html', {
         'items_raw': formatted_items,
         'latest_id': formatted_items[0]['id'] if formatted_items else '',
-        'tasks_json': tasks_list
+        'tasks_json': tasks_list,
+        'stacks_json': stacks_json,
+        'total_count': total,
+        'has_more': 'true' if total > _PAGE_SIZE else 'false',
+        'next_offset': _PAGE_SIZE,
+    })
+
+
+@login_required
+def get_more_records(request):
+    offset = int(request.GET.get('offset', _PAGE_SIZE))
+    collection = get_db_collection()
+    total = collection.estimated_document_count()
+    records = list(collection.find({}, {'value': 0, 'embedding': 0}).sort('createdat', -1).skip(offset).limit(_PAGE_SIZE))
+    return JsonResponse({
+        'items': [_format_record(r) for r in records],
+        'has_more': offset + _PAGE_SIZE < total,
+        'next_offset': offset + _PAGE_SIZE,
     })
 
 def logout_view(request):
@@ -113,13 +113,32 @@ def get_report_content(request, report_id):
         "entities": entities_data
     })
 
+_PAGE_SIZE = 50
+
 def get_db_collection():
-    db_password = os.getenv('DB_PASSWORD', '').replace('"', '')
-    db_user = os.getenv('DB_USER', '').replace('"', '')
-    db_url = os.getenv('DB_URL', '').replace('"', '')
-    uri = f"mongodb+srv://{db_user}:{db_password}@{db_url}/?appName=Cluster0"
-    client = MongoClient(uri, server_api=ServerApi('1'))
-    return client["queuei"]["mass_records"]
+    from tasks.config import MONGO_DB
+    return MONGO_DB["mass_records"]
+
+def _format_record(item):
+    created_at = item.get('createdat')
+    date_display = "N/A"
+    time_display = "N/A"
+    if created_at:
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        if hasattr(created_at, "strftime"):
+            date_display = created_at.strftime("%b %d, %Y")
+            time_display = created_at.strftime('%I:%M %p')
+    return {
+        'id': str(item['_id']),
+        'category': item.get('category', 'queuei'),
+        'key': item.get('key', ''),
+        'title': (item.get('a') or 'Untitled Record').split('|')[0].strip(),
+        'date_display': date_display,
+        'time_display': time_display,
+        'playlist_id': item.get('playlist_id', None),
+        'playlist_title': item.get('playlist_title', item.get('playlist_id', 'General Archive')),
+    }
 
 @login_required
 def intel_chat_view(request):
