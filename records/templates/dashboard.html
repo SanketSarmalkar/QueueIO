@@ -51,6 +51,12 @@
                 nexusMouseX: 0,
                 nexusMouseY: 0,
                 nexusStats: { nodes: 0, links: 0 },
+                nexusQuery: '',
+                nexusFilter: { report: true, locations: true, people: true, organizations: true },
+                nexusSelectedNode: null,
+                nexusNeighbors: null,
+                nexusMatches: [],
+                nexusMatchIndex: 0,
     
                 init() {
                     try {
@@ -77,23 +83,18 @@
                             }
                         });
                         
-                        this.$watch('searchQuery', (value) => {
-                            if (this.viewMode !== 'nexus' || !NEXUS_ENGINE) return;
-    
-                            NEXUS_ENGINE.nodeColor(NEXUS_ENGINE.nodeColor());
-                            NEXUS_ENGINE.linkColor(NEXUS_ENGINE.linkColor());
-    
+                        this.$watch('nexusQuery', (value) => {
+                            if (!NEXUS_ENGINE) return;
                             const term = value.toLowerCase().trim();
-                            if (term.length < 2) return;
-    
                             const nodes = NEXUS_ENGINE.graphData().nodes;
-                            const target = nodes.find(n => n.name && n.name.toLowerCase().includes(term));
-    
-                            if (target) {
-                                console.log("🚀 FLYING TO TARGET:", target.name);
-                                NEXUS_ENGINE.centerAt(target.x, target.y, 1000);
-                                NEXUS_ENGINE.zoom(4, 1000);
-                                this.hoverNode = target;
+                            this.nexusMatches = term.length > 1
+                                ? nodes.filter(n => n.name?.toLowerCase().includes(term))
+                                : [];
+                            this.nexusMatchIndex = 0;
+                            if (this.nexusMatches.length > 0) {
+                                const t = this.nexusMatches[0];
+                                NEXUS_ENGINE.centerAt(t.x, t.y, 800);
+                                NEXUS_ENGINE.zoom(3.5, 800);
                             }
                         });
                 
@@ -106,27 +107,41 @@
                 async selectItem(id) {
                     this.selectedId = id;
                     this.viewMode = 'entries';
+
+                    // If item isn't in the loaded set (e.g. opened from Nexus map), add a stub
+                    if (!this.items.find(i => i.id === id)) {
+                        this.items.push({
+                            id, loading: true, title: '...', category: '',
+                            key: '', date_display: '', time_display: '',
+                            playlist_id: null, playlist_title: '',
+                        });
+                    }
+
                     const item = this.items.find(i => i.id === id);
-                    
+
                     if (item && !item.value) {
                         item.loading = true;
                         try {
                             const response = await fetch(`/get-report/${id}/`);
                             const data = await response.json();
-                            
+
                             item.value = data.value;
-                
+                            if (item.title === '...') {
+                                item.title        = data.title        || 'Untitled';
+                                item.category     = data.category     || '';
+                                item.key          = data.key          || '';
+                                item.date_display = data.date_display || '';
+                                item.time_display = data.time_display || '';
+                                item.playlist_id  = data.playlist_id  || null;
+                                item.playlist_title = data.playlist_title || '';
+                            }
+
                             let cleanEntities = data.entities;
                             if (typeof cleanEntities === 'string') {
-                                try {
-                                    cleanEntities = JSON.parse(cleanEntities);
-                                } catch(e) {
-                                    cleanEntities = { people: [], locations: [], organizations: [] };
-                                }
+                                try { cleanEntities = JSON.parse(cleanEntities); }
+                                catch(e) { cleanEntities = { people: [], locations: [], organizations: [] }; }
                             }
                             item.entities = cleanEntities;
-                            console.log("Dossier Data Loaded:", item.entities);
-                
                         } catch (e) {
                             item.value = "Error loading content.";
                         } finally {
@@ -283,30 +298,47 @@
                             .d3Force('link', d3.forceLink().distance(150))
                             .d3Force('center', d3.forceCenter())
 
-                            .linkColor(() => '#1e3a5f')
-                            .linkWidth(1)
+                            .linkColor(link => {
+                                if (!this.nexusNeighbors) return '#1e3a5f';
+                                const s = link.source?.id ?? link.source;
+                                const t = link.target?.id ?? link.target;
+                                return (this.nexusNeighbors.has(s) && this.nexusNeighbors.has(t)) ? '#6366f1' : '#0f172a';
+                            })
+                            .linkWidth(link => {
+                                if (!this.nexusNeighbors) return 1;
+                                const s = link.source?.id ?? link.source;
+                                const t = link.target?.id ?? link.target;
+                                return (this.nexusNeighbors.has(s) && this.nexusNeighbors.has(t)) ? 2 : 0.4;
+                            })
 
                             .nodeCanvasObject((node, ctx, globalScale) => {
-                                const isHovered = this.hoverNode && node.id === this.hoverNode.id;
-                                const searchTerm = this.searchQuery.toLowerCase().trim();
-                                const isMatch = searchTerm.length > 1 && node.name?.toLowerCase().includes(searchTerm);
-                                const highlight = isHovered || isMatch;
+                                const isHovered  = this.hoverNode && node.id === this.hoverNode.id;
+                                const isSelected = this.nexusSelectedNode && node.id === this.nexusSelectedNode.id;
+                                const searchTerm = this.nexusQuery.toLowerCase().trim();
+                                const isMatch    = searchTerm.length > 1 && node.name?.toLowerCase().includes(searchTerm);
+                                const highlight  = isHovered || isMatch || isSelected;
+                                const typeVisible = this.nexusFilter[node.type] !== false;
+                                const isNeighbor  = !this.nexusNeighbors || this.nexusNeighbors.has(node.id);
 
-                                ctx.globalAlpha = (searchTerm.length > 1 && !isMatch) ? 0.07 : 1;
+                                if (!typeVisible) { ctx.globalAlpha = 0.03; }
+                                else if (searchTerm.length > 1 && !isMatch) { ctx.globalAlpha = 0.06; }
+                                else if (this.nexusNeighbors && !isNeighbor) { ctx.globalAlpha = 0.07; }
+                                else { ctx.globalAlpha = 1; }
 
-                                // Soft glow ring behind highlighted nodes
+                                if (!typeVisible) { ctx.globalAlpha = 1; return; }
+
                                 if (highlight) {
                                     ctx.beginPath();
-                                    ctx.arc(node.x, node.y, 20 / globalScale, 0, 2 * Math.PI);
-                                    ctx.fillStyle = (node.color || '#6366f1') + '28';
+                                    ctx.arc(node.x, node.y, 22 / globalScale, 0, 2 * Math.PI);
+                                    ctx.fillStyle = (node.color || '#6366f1') + '22';
                                     ctx.fill();
                                 }
 
-                                const radius = (isHovered ? 14 : 11) / globalScale;
+                                const radius = (isHovered || isSelected ? 14 : 11) / globalScale;
                                 ctx.beginPath();
                                 ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
                                 ctx.fillStyle = node.color || '#6366f1';
-                                ctx.shadowBlur = highlight ? 22 : 8;
+                                ctx.shadowBlur = highlight ? 24 : 8;
                                 ctx.shadowColor = node.color || '#6366f1';
                                 ctx.fill();
                                 ctx.shadowBlur = 0;
@@ -327,9 +359,24 @@
                             })
                             .onNodeHover(node => {
                                 this.hoverNode = node || null;
+                                if (node) {
+                                    const links = NEXUS_ENGINE.graphData().links;
+                                    this.nexusNeighbors = new Set([node.id]);
+                                    links.forEach(l => {
+                                        const s = l.source?.id ?? l.source;
+                                        const t = l.target?.id ?? l.target;
+                                        if (s === node.id || t === node.id) {
+                                            this.nexusNeighbors.add(s);
+                                            this.nexusNeighbors.add(t);
+                                        }
+                                    });
+                                } else {
+                                    this.nexusNeighbors = null;
+                                }
                                 elem.style.cursor = node ? 'pointer' : 'default';
                             })
                             .onNodeClick(node => {
+                                this.nexusSelectedNode = node;
                                 NEXUS_ENGINE.centerAt(node.x, node.y, 800);
                                 NEXUS_ENGINE.zoom(4, 800);
                                 if (node.type === 'report') {
@@ -339,6 +386,14 @@
 
                         setTimeout(() => { this.nexusLoading = false; }, 1200);
                     });
+                },
+
+                nexusGoToMatch(dir) {
+                    if (!this.nexusMatches.length || !NEXUS_ENGINE) return;
+                    this.nexusMatchIndex = (this.nexusMatchIndex + dir + this.nexusMatches.length) % this.nexusMatches.length;
+                    const t = this.nexusMatches[this.nexusMatchIndex];
+                    NEXUS_ENGINE.centerAt(t.x, t.y, 600);
+                    NEXUS_ENGINE.zoom(4, 600);
                 },
 
                 jumpToSource(src) {
@@ -815,18 +870,64 @@
                     </div>
                 </template>
 
-                <!-- Search (top right) -->
-                <div class="absolute top-6 right-6 z-20 w-64 md:w-80 group">
-                    <div class="relative">
-                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors"></i>
+                <!-- Search + filters (top right) -->
+                <div class="absolute top-6 right-6 z-20 w-72 md:w-96">
+                    <div class="relative group">
+                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors pointer-events-none"></i>
                         <input
                             type="text"
-                            x-model="searchQuery"
-                            placeholder="Search nodes (e.g. 'China' or 'Adani')..."
-                            class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
+                            x-model="nexusQuery"
+                            placeholder="Search nodes, entities, places..."
+                            class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3 pl-11 pr-10 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
                         >
+                        <button x-show="nexusQuery"
+                                @click="nexusQuery = ''; nexusMatches = []; nexusMatchIndex = 0"
+                                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors p-1">
+                            <i class="fa-solid fa-xmark text-xs"></i>
+                        </button>
                     </div>
-                    <p class="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-2 px-2 text-right">Auto-panning to intelligence nodes</p>
+                    <!-- Match counter + next/prev -->
+                    <div x-show="nexusQuery.length > 1" class="flex items-center justify-between mt-2 px-1">
+                        <span class="text-[9px] font-mono"
+                              :class="nexusMatches.length ? 'text-indigo-400' : 'text-slate-600'"
+                              x-text="nexusMatches.length
+                                  ? (nexusMatchIndex + 1) + ' / ' + nexusMatches.length + (nexusMatches.length !== 1 ? ' matches' : ' match')
+                                  : 'No matches'">
+                        </span>
+                        <div x-show="nexusMatches.length > 1" class="flex gap-1">
+                            <button @click="nexusGoToMatch(-1)"
+                                    class="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all">
+                                <i class="fa-solid fa-chevron-up text-[8px]"></i>
+                            </button>
+                            <button @click="nexusGoToMatch(1)"
+                                    class="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all">
+                                <i class="fa-solid fa-chevron-down text-[8px]"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Type filter chips -->
+                    <div class="flex flex-wrap gap-1.5 mt-2 justify-end">
+                        <button @click="nexusFilter.report = !nexusFilter.report"
+                                :class="nexusFilter.report ? 'border-indigo-500/60 text-indigo-400 bg-indigo-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            Reports
+                        </button>
+                        <button @click="nexusFilter.locations = !nexusFilter.locations"
+                                :class="nexusFilter.locations ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            Locations
+                        </button>
+                        <button @click="nexusFilter.people = !nexusFilter.people"
+                                :class="nexusFilter.people ? 'border-blue-500/60 text-blue-400 bg-blue-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            People
+                        </button>
+                        <button @click="nexusFilter.organizations = !nexusFilter.organizations"
+                                :class="nexusFilter.organizations ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            Orgs
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Legend + stats (top left) -->
@@ -862,6 +963,46 @@
                             </div>
                         </div>
                     </template>
+                </div>
+
+                <!-- Selected node panel (bottom) -->
+                <div x-show="nexusSelectedNode"
+                     x-transition:enter="transition ease-out duration-200"
+                     x-transition:enter-start="opacity-0 translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-150"
+                     x-transition:leave-start="opacity-100 translate-y-0"
+                     x-transition:leave-end="opacity-0 translate-y-2"
+                     class="absolute bottom-0 left-0 right-0 z-20 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-6 py-4 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="w-3 h-3 rounded-full flex-shrink-0"
+                              :style="nexusSelectedNode ? { background: nexusSelectedNode.color, boxShadow: '0 0 8px ' + nexusSelectedNode.color } : {}">
+                        </span>
+                        <div class="min-w-0">
+                            <p class="text-sm font-bold text-white truncate" x-text="nexusSelectedNode?.name"></p>
+                            <p class="text-[9px] font-mono uppercase tracking-wider mt-0.5"
+                               :class="{
+                                   'text-indigo-400':  nexusSelectedNode?.type === 'report',
+                                   'text-emerald-400': nexusSelectedNode?.type === 'locations',
+                                   'text-blue-400':    nexusSelectedNode?.type === 'people',
+                                   'text-amber-400':   nexusSelectedNode?.type === 'organizations'
+                               }"
+                               x-text="nexusSelectedNode?.type">
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <template x-if="nexusSelectedNode?.type === 'report'">
+                            <button @click="viewMode = 'entries'; selectItem(nexusSelectedNode.id); nexusSelectedNode = null"
+                                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all">
+                                Open Report <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                            </button>
+                        </template>
+                        <button @click="nexusSelectedNode = null"
+                                class="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-all">
+                            <i class="fa-solid fa-xmark text-xs"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Zoom controls (bottom right) -->

@@ -98,7 +98,10 @@ def signup_view(request):
 @login_required
 def get_report_content(request, report_id):
     collection = get_db_collection()
-    report = collection.find_one({"_id": ObjectId(report_id)}, {"value": 1, "entities": 1})
+    report = collection.find_one(
+        {"_id": ObjectId(report_id)},
+        {"value": 1, "entities": 1, "a": 1, "category": 1, "key": 1, "createdat": 1, "playlist_id": 1, "playlist_title": 1}
+    )
     raw_entities = report.get('entities', '{}')
     if isinstance(raw_entities, str):
         try:
@@ -108,9 +111,25 @@ def get_report_content(request, report_id):
     else:
         entities_data = raw_entities
 
+    created_at = report.get('createdat')
+    date_display, time_display = 'N/A', 'N/A'
+    if created_at:
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        if hasattr(created_at, 'strftime'):
+            date_display = created_at.strftime('%b %d, %Y')
+            time_display = created_at.strftime('%I:%M %p')
+
     return JsonResponse({
         "value": report.get('value', 'No content found.'),
-        "entities": entities_data
+        "entities": entities_data,
+        "title": (report.get('a') or 'Untitled Record').split('|')[0].strip(),
+        "category": report.get('category', ''),
+        "key": report.get('key', ''),
+        "date_display": date_display,
+        "time_display": time_display,
+        "playlist_id": report.get('playlist_id'),
+        "playlist_title": report.get('playlist_title', ''),
     })
 
 _PAGE_SIZE = 50
