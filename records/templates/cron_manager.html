@@ -16,36 +16,38 @@
     {{ task_keys_json|json_script:"task-keys-data" }}
 
     <!-- Header -->
-    <header class="h-14 bg-slate-900 flex items-center px-6 justify-between shadow-lg border-b border-slate-800 sticky top-0 z-50">
+    <header class="h-14 bg-slate-900 flex items-center px-4 md:px-6 justify-between shadow-lg border-b border-slate-800 sticky top-0 z-50">
         <div class="flex items-center gap-3">
             <a href="/" class="flex items-center gap-3">
                 <img src="{% static 'favicon.png' %}" alt="Logo" class="w-9 h-9 rounded-lg object-cover border border-slate-700/50">
-                <span class="font-black tracking-tighter text-lg uppercase text-white">Queue <span class="text-indigo-400">IO</span></span>
+                <span class="font-black tracking-tighter text-lg uppercase text-white hidden sm:block">Queue <span class="text-indigo-400">IO</span></span>
             </a>
         </div>
-        <div class="flex items-center gap-6">
-            <nav class="flex items-center gap-1">
-                <a href="/" class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all">Dashboard</a>
-                <span class="px-3 py-1 rounded text-[10px] font-bold uppercase bg-slate-800 text-indigo-400 flex items-center gap-1">
-                    <i class="fa-solid fa-clock text-[9px]"></i> Cron
+        <div class="flex items-center gap-2 md:gap-6">
+            <nav class="flex items-center gap-0.5 md:gap-1">
+                <a href="/" class="px-2 md:px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-house text-[9px]"></i><span class="hidden md:inline"> Dashboard</span>
+                </a>
+                <span class="px-2 md:px-3 py-1 rounded text-[10px] font-bold uppercase bg-slate-800 text-indigo-400 flex items-center gap-1">
+                    <i class="fa-solid fa-clock text-[9px]"></i><span class="hidden md:inline"> Cron</span>
                 </span>
-                <a href="{% url 'settings' %}" class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
-                    <i class="fa-solid fa-sliders text-[9px]"></i> Settings
+                <a href="{% url 'settings' %}" class="px-2 md:px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-sliders text-[9px]"></i><span class="hidden md:inline"> Settings</span>
                 </a>
             </nav>
-            <a href="{% url 'logout' %}" class="flex items-center gap-2 text-slate-400 hover:text-red-400 transition-colors text-[10px] font-mono uppercase border-l border-slate-700 pl-6">
-                <i class="fa-solid fa-power-off"></i> Logout
+            <a href="{% url 'logout' %}" class="flex items-center gap-1.5 text-slate-400 hover:text-red-400 transition-colors text-[10px] font-mono uppercase border-l border-slate-700 pl-3 md:pl-6">
+                <i class="fa-solid fa-power-off"></i><span class="hidden md:inline"> Logout</span>
             </a>
         </div>
     </header>
 
-    <div class="max-w-5xl mx-auto px-6 py-10">
+    <div class="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-10">
 
         <!-- Page title -->
-        <div class="mb-8 flex items-center justify-between">
+        <div class="mb-6 md:mb-8 flex flex-wrap items-start justify-between gap-4">
             <div>
-                <h1 class="text-2xl font-black uppercase tracking-tighter text-white">Cron Manager</h1>
-                <p class="text-slate-500 text-xs font-mono mt-1">Schedule pipeline tasks to run automatically. Uses UTC time. Changes take effect immediately.</p>
+                <h1 class="text-xl md:text-2xl font-black uppercase tracking-tighter text-white">Cron Manager</h1>
+                <p class="text-slate-500 text-xs font-mono mt-1">Schedule pipeline tasks to run automatically. UTC time.</p>
             </div>
             <button @click="openCreate()"
                     class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-all">
@@ -66,8 +68,53 @@
             <p class="text-slate-500 text-sm font-mono">No cron jobs yet. Create one to schedule a pipeline task.</p>
         </div>
 
-        <!-- Jobs table -->
-        <div x-show="jobs.length > 0" class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <!-- Jobs: mobile card layout -->
+        <div x-show="jobs.length > 0" class="md:hidden space-y-3">
+            <template x-for="job in jobs" :key="job.id">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <div class="flex items-start justify-between mb-3">
+                        <div class="min-w-0 flex-1 mr-3">
+                            <p class="font-bold text-white text-sm truncate" x-text="job.name"></p>
+                            <div class="flex items-center gap-2 mt-1 flex-wrap">
+                                <template x-if="job.job_type === 'endpoint'">
+                                    <span class="bg-amber-500/20 text-amber-300 font-bold text-[9px] uppercase px-2 py-0.5 rounded">Endpoint</span>
+                                </template>
+                                <template x-if="job.job_type !== 'endpoint'">
+                                    <span class="bg-indigo-500/20 text-indigo-300 font-bold text-[9px] uppercase px-2 py-0.5 rounded">Pipeline</span>
+                                </template>
+                                <span class="font-mono text-[10px] text-slate-500 truncate max-w-[180px]"
+                                      x-text="job.job_type === 'endpoint' ? job.endpoint_url : job.task_key"></span>
+                            </div>
+                        </div>
+                        <button @click="toggleJob(job)"
+                                :class="job.is_active ? 'bg-emerald-500/20 text-emerald-400 hover:bg-red-500/10 hover:text-red-400' : 'bg-slate-700/50 text-slate-500 hover:bg-emerald-500/10 hover:text-emerald-400'"
+                                class="text-[9px] font-black uppercase px-2.5 py-1 rounded transition-all shrink-0"
+                                x-text="job.is_active ? 'Active' : 'Paused'">
+                        </button>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="font-mono text-[11px] text-indigo-300" x-text="job.cron_expression"></p>
+                            <p class="text-[9px] text-slate-600 mt-0.5" x-text="job.last_run_at ? 'Last: ' + fmtDate(job.last_run_at) : 'Not run yet'"></p>
+                        </div>
+                        <div class="flex items-center gap-0.5">
+                            <button @click="runNow(job)" class="text-slate-500 hover:text-emerald-400 transition-colors p-2 rounded hover:bg-slate-800">
+                                <i class="fa-solid fa-play text-xs"></i>
+                            </button>
+                            <button @click="openEdit(job)" class="text-slate-500 hover:text-indigo-400 transition-colors p-2 rounded hover:bg-slate-800">
+                                <i class="fa-solid fa-pen-to-square text-xs"></i>
+                            </button>
+                            <button @click="deleteJob(job)" class="text-slate-600 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-800">
+                                <i class="fa-solid fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Jobs: desktop table -->
+        <div x-show="jobs.length > 0" class="hidden md:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
             <table class="w-full text-xs">
                 <thead>
                     <tr class="border-b border-slate-800 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
@@ -108,18 +155,15 @@
                             </td>
                             <td class="px-5 py-4">
                                 <div class="flex items-center justify-end gap-1">
-                                    <button @click="runNow(job)"
-                                            title="Run now"
+                                    <button @click="runNow(job)" title="Run now"
                                             class="text-slate-500 hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-800">
                                         <i class="fa-solid fa-play text-[10px]"></i>
                                     </button>
-                                    <button @click="openEdit(job)"
-                                            title="Edit"
+                                    <button @click="openEdit(job)" title="Edit"
                                             class="text-slate-500 hover:text-indigo-400 transition-colors px-2 py-1 rounded hover:bg-slate-800">
                                         <i class="fa-solid fa-pen-to-square text-[10px]"></i>
                                     </button>
-                                    <button @click="deleteJob(job)"
-                                            title="Delete"
+                                    <button @click="deleteJob(job)" title="Delete"
                                             class="text-slate-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-slate-800">
                                         <i class="fa-solid fa-trash text-[10px]"></i>
                                     </button>
@@ -136,7 +180,7 @@
             <h3 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-3 flex items-center gap-2">
                 <i class="fa-solid fa-circle-info"></i> Cron Expression Reference
             </h3>
-            <div class="grid grid-cols-2 gap-2 md:grid-cols-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 md:grid-cols-3">
                 <template x-for="ex in examples" :key="ex.expr">
                     <div class="bg-slate-800/50 rounded-lg px-3 py-2 cursor-pointer hover:bg-slate-800 transition-colors"
                          @click="form.cron_expression = ex.expr">
@@ -150,9 +194,9 @@
     </div>
 
     <!-- Create / Edit Modal -->
-    <div x-show="showModal" x-transition class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div x-show="showModal" x-transition class="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:p-4">
         <div @click.outside="showModal = false"
-             class="bg-slate-900 border border-slate-700 rounded-2xl p-8 w-full max-w-md shadow-2xl">
+             class="bg-slate-900 border border-slate-700 rounded-t-2xl md:rounded-2xl p-5 md:p-8 w-full md:max-w-md shadow-2xl max-h-[92vh] md:max-h-[90vh] overflow-y-auto">
             <h3 class="text-sm font-black uppercase tracking-wider text-white mb-6 flex items-center gap-2">
                 <i class="fa-solid fa-clock text-indigo-400"></i>
                 <span x-text="editingId ? 'Edit Job' : 'New Cron Job'"></span>
