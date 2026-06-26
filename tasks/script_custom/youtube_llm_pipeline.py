@@ -111,29 +111,43 @@ class YouTubeLLMPipeline:
             return None
 
     def get_transcript(self, video):
-        """Orchestrator: Tries Library first, then API fallback."""
+        """Orchestrator: cache-first, then Library → RapidAPI → Supadata."""
         if not video or 'id' not in video:
             return None
-            
+
         video_id = video['id']
 
         if self.check_id_if_present(video_id):
             logging.info(f"Skipping {video_id}: Already processed.")
             return None
-        
-        transcript = None
-        transcript = self._fetch_from_library(video_id)
 
+        # Return cached transcript if available — avoids re-fetching on Gemini retries
+        from tasks.models import TranscriptCache
+        try:
+            cached = TranscriptCache.objects.filter(video_id=video_id).first()
+            if cached:
+                logging.info(f"Transcript cache hit for {video_id}")
+                return cached.transcript
+        except Exception as e:
+            logging.warning(f"Transcript cache lookup failed for {video_id}: {e}")
+
+        transcript = self._fetch_from_library(video_id)
         if not transcript:
             transcript = self._fetch_from_api(video_id)
-
         if not transcript:
             transcript = self._fetch_from_supadata(video_id)
-            
+
         if transcript:
-            logging.info(f"Successfully obtained transcript for {video_id}")
+            try:
+                TranscriptCache.objects.update_or_create(
+                    video_id=video_id,
+                    defaults={'transcript': transcript},
+                )
+                logging.info(f"Transcript cached for {video_id}")
+            except Exception as e:
+                logging.warning(f"Failed to cache transcript for {video_id}: {e}")
             return transcript
-            
+
         logging.error(f"All transcript sources failed for {video_id}")
         return None
 
