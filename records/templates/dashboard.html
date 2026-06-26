@@ -41,34 +41,60 @@
                 },
                 items: [],
                 tasks: [],
+                stacks: [],
+                totalCount: 0,
+                hasMore: false,
+                nextOffset: 50,
+                loadingMore: false,
                 hoverNode: null,
                 nexusLoading: false,
+                nexusMouseX: 0,
+                nexusMouseY: 0,
+                nexusStats: { nodes: 0, links: 0 },
+                nexusQuery: '',
+                nexusFilter: { report: true, locations: true, people: true, organizations: true },
+                nexusSelectedNode: null,
+                nexusNeighbors: null,
+                nexusMatches: [],
+                nexusMatchIndex: 0,
     
                 init() {
                     try {
                         const itemsData = document.getElementById('items-data');
                         const tasksData = document.getElementById('tasks-data');
-                        
+                        const stacksData = document.getElementById('stacks-data');
+
                         this.items = itemsData ? JSON.parse(itemsData.textContent) : [];
                         this.tasks = tasksData ? JSON.parse(tasksData.textContent) : [];
+                        this.stacks = stacksData ? JSON.parse(stacksData.textContent) : [];
+                        this.totalCount = {{ total_count }};
+                        this.hasMore = {{ has_more }};
+                        this.nextOffset = {{ next_offset }};
+
+                        this.$nextTick(() => {
+                            const container = document.getElementById('sidebar-scroll');
+                            const sentinel = document.getElementById('scroll-sentinel');
+                            if (container && sentinel) {
+                                new IntersectionObserver((entries) => {
+                                    if (entries[0].isIntersecting && this.hasMore && !this.loadingMore) {
+                                        this.loadMoreItems();
+                                    }
+                                }, { root: container, rootMargin: '100px' }).observe(sentinel);
+                            }
+                        });
                         
-                        this.$watch('searchQuery', (value) => {
-                            if (this.viewMode !== 'nexus' || !NEXUS_ENGINE) return;
-    
-                            NEXUS_ENGINE.nodeColor(NEXUS_ENGINE.nodeColor());
-                            NEXUS_ENGINE.linkColor(NEXUS_ENGINE.linkColor());
-    
+                        this.$watch('nexusQuery', (value) => {
+                            if (!NEXUS_ENGINE) return;
                             const term = value.toLowerCase().trim();
-                            if (term.length < 2) return;
-    
                             const nodes = NEXUS_ENGINE.graphData().nodes;
-                            const target = nodes.find(n => n.name && n.name.toLowerCase().includes(term));
-    
-                            if (target) {
-                                console.log("🚀 FLYING TO TARGET:", target.name);
-                                NEXUS_ENGINE.centerAt(target.x, target.y, 1000);
-                                NEXUS_ENGINE.zoom(4, 1000);
-                                this.hoverNode = target;
+                            this.nexusMatches = term.length > 1
+                                ? nodes.filter(n => n.name?.toLowerCase().includes(term))
+                                : [];
+                            this.nexusMatchIndex = 0;
+                            if (this.nexusMatches.length > 0) {
+                                const t = this.nexusMatches[0];
+                                NEXUS_ENGINE.centerAt(t.x, t.y, 800);
+                                NEXUS_ENGINE.zoom(3.5, 800);
                             }
                         });
                 
@@ -81,27 +107,41 @@
                 async selectItem(id) {
                     this.selectedId = id;
                     this.viewMode = 'entries';
+
+                    // If item isn't in the loaded set (e.g. opened from Nexus map), add a stub
+                    if (!this.items.find(i => i.id === id)) {
+                        this.items.push({
+                            id, loading: true, title: '...', category: '',
+                            key: '', date_display: '', time_display: '',
+                            playlist_id: null, playlist_title: '',
+                        });
+                    }
+
                     const item = this.items.find(i => i.id === id);
-                    
+
                     if (item && !item.value) {
                         item.loading = true;
                         try {
                             const response = await fetch(`/get-report/${id}/`);
                             const data = await response.json();
-                            
+
                             item.value = data.value;
-                
+                            if (item.title === '...') {
+                                item.title        = data.title        || 'Untitled';
+                                item.category     = data.category     || '';
+                                item.key          = data.key          || '';
+                                item.date_display = data.date_display || '';
+                                item.time_display = data.time_display || '';
+                                item.playlist_id  = data.playlist_id  || null;
+                                item.playlist_title = data.playlist_title || '';
+                            }
+
                             let cleanEntities = data.entities;
                             if (typeof cleanEntities === 'string') {
-                                try {
-                                    cleanEntities = JSON.parse(cleanEntities);
-                                } catch(e) {
-                                    cleanEntities = { people: [], locations: [], organizations: [] };
-                                }
+                                try { cleanEntities = JSON.parse(cleanEntities); }
+                                catch(e) { cleanEntities = { people: [], locations: [], organizations: [] }; }
                             }
                             item.entities = cleanEntities;
-                            console.log("Dossier Data Loaded:", item.entities);
-                
                         } catch (e) {
                             item.value = "Error loading content.";
                         } finally {
@@ -115,16 +155,20 @@
                     localStorage.setItem('darkMode', this.darkMode);
                 },
     
-                get playlistStacks() {
-                    const groups = {};
-                    this.items.forEach(item => {
-                        const pid = item.playlist_id || 'unassigned';
-                        if (!groups[pid]) {
-                            groups[pid] = { id: pid, count: 0, title: item.playlist_title || 'General Archive' };
-                        }
-                        groups[pid].count++;
-                    });
-                    return Object.values(groups);
+                async loadMoreItems() {
+                    if (!this.hasMore || this.loadingMore) return;
+                    this.loadingMore = true;
+                    try {
+                        const resp = await fetch(`/records/?offset=${this.nextOffset}`);
+                        const data = await resp.json();
+                        this.items.push(...data.items);
+                        this.hasMore = data.has_more;
+                        this.nextOffset = data.next_offset;
+                    } catch (e) {
+                        console.error('Failed to load more records', e);
+                    } finally {
+                        this.loadingMore = false;
+                    }
                 },
     
                 get filteredItems() {
@@ -226,10 +270,9 @@
                 },
     
                 async renderNexus() {
-
                     if (NEXUS_ENGINE) {
                         console.log("⚡ Nexus Engine active. Resuming session.");
-                        return; 
+                        return;
                     }
 
                     this.nexusLoading = true;
@@ -237,64 +280,120 @@
                     this.$nextTick(async () => {
                         const elem = document.getElementById('nexus-canvas');
                         if (!elem) return;
-    
+
                         const response = await fetch('/nexus-data/');
                         const data = await response.json();
 
                         this.nexusData = data;
-    
+                        this.nexusStats = { nodes: data.nodes.length, links: data.links.length };
+
                         if (NEXUS_ENGINE) NEXUS_ENGINE._destructor();
-    
+
                         NEXUS_ENGINE = ForceGraph()(elem)
                             .graphData(data)
                             .nodeId('id')
                             .backgroundColor('#020617')
-                            
-                            .d3Force('charge', d3.forceManyBody().strength(-1500)) 
+
+                            .d3Force('charge', d3.forceManyBody().strength(-1500))
                             .d3Force('link', d3.forceLink().distance(150))
                             .d3Force('center', d3.forceCenter())
-                            
-                            .linkColor(() => '#1e293b') 
-                            .linkWidth(0.7)
-    
+
+                            .linkColor(link => {
+                                if (!this.nexusNeighbors) return '#1e3a5f';
+                                const s = link.source?.id ?? link.source;
+                                const t = link.target?.id ?? link.target;
+                                return (this.nexusNeighbors.has(s) && this.nexusNeighbors.has(t)) ? '#6366f1' : '#0f172a';
+                            })
+                            .linkWidth(link => {
+                                if (!this.nexusNeighbors) return 1;
+                                const s = link.source?.id ?? link.source;
+                                const t = link.target?.id ?? link.target;
+                                return (this.nexusNeighbors.has(s) && this.nexusNeighbors.has(t)) ? 2 : 0.4;
+                            })
+
                             .nodeCanvasObject((node, ctx, globalScale) => {
-                                const searchTerm = this.searchQuery.toLowerCase().trim();
-                                const isMatch = searchTerm.length > 1 && node.name?.toLowerCase().includes(searchTerm);
-                                
-                                ctx.globalAlpha = (searchTerm.length > 1 && !isMatch) ? 0.05 : 1;
-    
+                                const isHovered  = this.hoverNode && node.id === this.hoverNode.id;
+                                const isSelected = this.nexusSelectedNode && node.id === this.nexusSelectedNode.id;
+                                const searchTerm = this.nexusQuery.toLowerCase().trim();
+                                const isMatch    = searchTerm.length > 1 && node.name?.toLowerCase().includes(searchTerm);
+                                const highlight  = isHovered || isMatch || isSelected;
+                                const typeVisible = this.nexusFilter[node.type] !== false;
+                                const isNeighbor  = !this.nexusNeighbors || this.nexusNeighbors.has(node.id);
+
+                                if (!typeVisible) { ctx.globalAlpha = 0.03; }
+                                else if (searchTerm.length > 1 && !isMatch) { ctx.globalAlpha = 0.06; }
+                                else if (this.nexusNeighbors && !isNeighbor) { ctx.globalAlpha = 0.07; }
+                                else { ctx.globalAlpha = 1; }
+
+                                if (!typeVisible) { ctx.globalAlpha = 1; return; }
+
+                                if (highlight) {
+                                    ctx.beginPath();
+                                    ctx.arc(node.x, node.y, 22 / globalScale, 0, 2 * Math.PI);
+                                    ctx.fillStyle = (node.color || '#6366f1') + '22';
+                                    ctx.fill();
+                                }
+
+                                const radius = (isHovered || isSelected ? 14 : 11) / globalScale;
                                 ctx.beginPath();
-                                ctx.arc(node.x, node.y, 12 / globalScale, 0, 2 * Math.PI);
+                                ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
                                 ctx.fillStyle = node.color || '#6366f1';
-                                ctx.shadowBlur = isMatch ? 30 : 10;
+                                ctx.shadowBlur = highlight ? 24 : 8;
                                 ctx.shadowColor = node.color || '#6366f1';
                                 ctx.fill();
-    
+                                ctx.shadowBlur = 0;
+
                                 ctx.beginPath();
-                                ctx.arc(node.x, node.y, 5 / globalScale, 0, 2 * Math.PI);
-                                ctx.fillStyle = "#fff";
+                                ctx.arc(node.x, node.y, 3.5 / globalScale, 0, 2 * Math.PI);
+                                ctx.fillStyle = '#ffffff';
                                 ctx.fill();
-    
-                                if (isMatch || globalScale > 3) {
-                                    ctx.shadowBlur = 0;
-                                    ctx.font = `${16/globalScale}px Inter, sans-serif`;
+
+                                if (highlight || globalScale > 2) {
+                                    ctx.font = `bold ${13 / globalScale}px Inter, sans-serif`;
                                     ctx.textAlign = 'center';
-                                    ctx.fillStyle = isMatch ? '#fff' : '#64748b';
-                                    ctx.fillText(node.name, node.x, node.y + 20/globalScale);
+                                    ctx.fillStyle = highlight ? '#ffffff' : '#94a3b8';
+                                    ctx.fillText(node.name, node.x, node.y + 20 / globalScale);
                                 }
+
                                 ctx.globalAlpha = 1;
                             })
+                            .onNodeHover(node => {
+                                this.hoverNode = node || null;
+                                if (node) {
+                                    const links = NEXUS_ENGINE.graphData().links;
+                                    this.nexusNeighbors = new Set([node.id]);
+                                    links.forEach(l => {
+                                        const s = l.source?.id ?? l.source;
+                                        const t = l.target?.id ?? l.target;
+                                        if (s === node.id || t === node.id) {
+                                            this.nexusNeighbors.add(s);
+                                            this.nexusNeighbors.add(t);
+                                        }
+                                    });
+                                } else {
+                                    this.nexusNeighbors = null;
+                                }
+                                elem.style.cursor = node ? 'pointer' : 'default';
+                            })
                             .onNodeClick(node => {
+                                this.nexusSelectedNode = node;
                                 NEXUS_ENGINE.centerAt(node.x, node.y, 800);
                                 NEXUS_ENGINE.zoom(4, 800);
                                 if (node.type === 'report') {
                                     setTimeout(() => { this.selectItem(node.id); }, 900);
                                 }
                             });
-                            setTimeout(() => {
-                                this.nexusLoading = false;
-                            }, 1200);
+
+                        setTimeout(() => { this.nexusLoading = false; }, 1200);
                     });
+                },
+
+                nexusGoToMatch(dir) {
+                    if (!this.nexusMatches.length || !NEXUS_ENGINE) return;
+                    this.nexusMatchIndex = (this.nexusMatchIndex + dir + this.nexusMatches.length) % this.nexusMatches.length;
+                    const t = this.nexusMatches[this.nexusMatchIndex];
+                    NEXUS_ENGINE.centerAt(t.x, t.y, 600);
+                    NEXUS_ENGINE.zoom(4, 600);
                 },
 
                 jumpToSource(src) {
@@ -342,6 +441,7 @@
 >
     {{ items_raw|json_script:"items-data" }}
     {{ tasks_json|json_script:"tasks-data" }}
+    {{ stacks_json|json_script:"stacks-data" }}
     <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between shadow-lg z-50 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
             <button @click="sidebarOpen = !sidebarOpen" class="p-2 -ml-2 text-slate-400 hover:text-white transition-all">
@@ -394,12 +494,20 @@
                     </button>
                 </div>
 
-                {% if user.is_superuser %} 
-                <button @click="viewMode = 'command'" 
+                {% if user.is_superuser %}
+                <button @click="viewMode = 'command'"
                         :class="viewMode === 'command' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white'"
                         class="px-3 py-1 rounded text-[10px] font-bold uppercase transition-all">
                     Command Center
                 </button>
+                <a href="{% url 'cron_manager' %}"
+                   class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-clock text-[9px]"></i> Cron
+                </a>
+                <a href="{% url 'settings' %}"
+                   class="px-3 py-1 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white transition-all flex items-center gap-1">
+                    <i class="fa-solid fa-sliders text-[9px]"></i> Settings
+                </a>
                 {% endif %}
             </nav>
 
@@ -433,11 +541,11 @@
                 </div>
             </div>
             
-            <div class="flex-1 overflow-y-auto custom-scrollbar">
+            <div id="sidebar-scroll" class="flex-1 overflow-y-auto custom-scrollbar">
                 <template x-for="item in filteredItems" :key="item.key">
                     <div @click="selectItem(item.id)"
-                         :class="selectedId === item.id 
-                            ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600') 
+                         :class="selectedId === item.id
+                            ? (darkMode ? 'bg-slate-800 border-l-4 border-indigo-500' : 'bg-indigo-50 border-l-4 border-indigo-600')
                             : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-l-4 border-transparent'"
                          class="p-4 cursor-pointer border-b border-slate-50 dark:border-slate-800 transition-all duration-200 group">
                          <div class="flex justify-between items-start mb-1">
@@ -450,6 +558,10 @@
                         <h4 class="text-sm font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-400 leading-snug line-clamp-2" x-text="item.title"></h4>
                     </div>
                 </template>
+                <div id="scroll-sentinel" class="h-1"></div>
+                <div x-show="loadingMore" class="py-3 text-center">
+                    <span class="text-[9px] font-mono text-slate-500 dark:text-slate-600 animate-pulse uppercase tracking-widest">Loading...</span>
+                </div>
             </div>
         </aside>
 
@@ -532,25 +644,27 @@
             
             <template x-if="viewMode === 'stacks'">
                 <div class="p-8 max-w-7xl mx-auto">
-                    <h2 class="text-2xl font-black text-slate-800 dark:text-white mb-8 uppercase tracking-tight">Intelligence Stacks</h2>
-                    
+                    <div class="flex items-baseline gap-3 mb-8">
+                        <h2 class="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-tight">Intelligence Stacks</h2>
+                        <span class="text-[10px] font-mono text-slate-500 uppercase" x-text="totalCount + ' total reports'"></span>
+                    </div>
+
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <template x-for="stack in playlistStacks" :key="stack.id">
-                            <div @click="openStack(stack.id)" 
+                        <template x-for="stack in stacks" :key="stack.id">
+                            <div @click="openStack(stack.id)"
                                  class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 cursor-pointer hover:border-indigo-500 transition-all hover:shadow-2xl hover:-translate-y-1">
-                                
+
                                 <div class="w-12 h-12 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-4 group-hover:scale-110 transition-transform">
                                     <i class="fa-solid fa-folder-tree text-xl"></i>
                                 </div>
-        
-                                <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200 mb-1" x-text="stack.title"></h3> 
+
+                                <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200 mb-1" x-text="stack.title"></h3>
                                 <div class="flex items-center justify-between mt-4">
                                     <span class="text-[9px] font-mono text-slate-500 uppercase" x-text="'ID: ' + stack.id"></span>
-                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
-                                </div>
-                                <div class="flex items-center justify-between mt-4">
-                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
                                     <span class="text-[10px] font-mono text-indigo-500 font-bold">OPEN STACK <i class="fa-solid fa-arrow-right ml-1"></i></span>
+                                </div>
+                                <div class="mt-2">
+                                    <span class="text-[10px] font-mono text-slate-400 uppercase" x-text="stack.count + ' Reports'"></span>
                                 </div>
                             </div>
                         </template>
@@ -713,17 +827,19 @@
                 </div>
             </template>
 
-            <div 
-                x-show="viewMode === 'nexus'" 
+            <div
+                x-show="viewMode === 'nexus'"
                 class="h-full w-full bg-slate-950 relative overflow-hidden"
-                style="display: none;" 
+                style="display: none;"
                 :class="{ 'block': viewMode === 'nexus' }"
+                @mousemove="nexusMouseX = $event.clientX; nexusMouseY = $event.clientY"
             >
-            <div x-show="nexusLoading" 
-                x-transition:enter="transition ease-out duration-300"
-                x-transition:leave="transition ease-in duration-500"
-                class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl">
-                <div class="flex flex-col items-center gap-6">
+                <!-- Loading overlay -->
+                <div x-show="nexusLoading"
+                    x-transition:enter="transition ease-out duration-300"
+                    x-transition:leave="transition ease-in duration-500"
+                    class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl">
+                    <div class="flex flex-col items-center gap-6">
                         <div class="relative w-20 h-20">
                             <div class="absolute inset-0 border-4 border-indigo-500/10 rounded-full"></div>
                             <div class="absolute inset-0 border-4 border-t-indigo-500 rounded-full animate-spin"></div>
@@ -733,33 +849,180 @@
                             <p class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] animate-pulse">Initializing Nexus Engine</p>
                             <p class="text-[8px] font-mono text-slate-500 uppercase tracking-widest">Synthesizing Cross-Report Relationships...</p>
                         </div>
+                    </div>
                 </div>
-            </div>
-                    <div class="absolute top-6 right-6 z-20 w-64 md:w-80 group">
-                        <div class="relative">
-                            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors"></i>
-                            <input 
-                                type="text" 
-                                x-model="searchQuery" 
-                                placeholder="Search Nexus (e.g. 'China' or 'Adani')..." 
-                                class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
-                            >
-                        </div>
-                        
-                        <p class="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-2 px-2 text-right">
-                            Auto-panning to Intelligence Nodes
-                        </p>
-                    </div>
-                    <div class="absolute top-6 left-6 z-10 bg-slate-900/50 backdrop-blur border border-slate-800 p-4 rounded-2xl pointer-events-none">
-                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Nexus Legend</h3>
-                        <div class="space-y-2">
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-indigo-500"></span> <span class="text-[9px] text-slate-400 uppercase">Reports</span></div>
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span class="text-[9px] text-slate-400 uppercase">Locations</span></div>
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-500"></span> <span class="text-[9px] text-slate-400 uppercase">People</span></div>
+
+                <!-- Hover tooltip (fixed to escape overflow) -->
+                <template x-if="hoverNode && viewMode === 'nexus'">
+                    <div :style="`left: ${nexusMouseX + 14}px; top: ${nexusMouseY - 12}px`"
+                         class="fixed z-[200] pointer-events-none">
+                        <div class="bg-slate-900/95 border border-slate-700/80 rounded-xl px-3 py-2 shadow-2xl backdrop-blur-sm max-w-[220px]">
+                            <p class="font-bold text-white text-xs leading-snug truncate" x-text="hoverNode.name"></p>
+                            <p class="text-[9px] font-mono uppercase tracking-wider mt-0.5"
+                               :class="{
+                                   'text-indigo-400': hoverNode.type === 'report',
+                                   'text-emerald-400': hoverNode.type === 'locations',
+                                   'text-blue-400':    hoverNode.type === 'people',
+                                   'text-amber-400':   hoverNode.type === 'organizations'
+                               }"
+                               x-text="hoverNode.type"></p>
                         </div>
                     </div>
-                    
-                    <div id="nexus-canvas" class="h-full w-full"></div>
+                </template>
+
+                <!-- Search + filters (top right) -->
+                <div class="absolute top-6 right-6 z-20 w-72 md:w-96">
+                    <div class="relative group">
+                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors pointer-events-none"></i>
+                        <input
+                            type="text"
+                            x-model="nexusQuery"
+                            placeholder="Search nodes, entities, places..."
+                            class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3 pl-11 pr-10 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
+                        >
+                        <button x-show="nexusQuery"
+                                @click="nexusQuery = ''; nexusMatches = []; nexusMatchIndex = 0"
+                                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors p-1">
+                            <i class="fa-solid fa-xmark text-xs"></i>
+                        </button>
+                    </div>
+                    <!-- Match counter + next/prev -->
+                    <div x-show="nexusQuery.length > 1" class="flex items-center justify-between mt-2 px-1">
+                        <span class="text-[9px] font-mono"
+                              :class="nexusMatches.length ? 'text-indigo-400' : 'text-slate-600'"
+                              x-text="nexusMatches.length
+                                  ? (nexusMatchIndex + 1) + ' / ' + nexusMatches.length + (nexusMatches.length !== 1 ? ' matches' : ' match')
+                                  : 'No matches'">
+                        </span>
+                        <div x-show="nexusMatches.length > 1" class="flex gap-1">
+                            <button @click="nexusGoToMatch(-1)"
+                                    class="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all">
+                                <i class="fa-solid fa-chevron-up text-[8px]"></i>
+                            </button>
+                            <button @click="nexusGoToMatch(1)"
+                                    class="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all">
+                                <i class="fa-solid fa-chevron-down text-[8px]"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Type filter chips -->
+                    <div class="flex flex-wrap gap-1.5 mt-2 justify-end">
+                        <button @click="nexusFilter.report = !nexusFilter.report"
+                                :class="nexusFilter.report ? 'border-indigo-500/60 text-indigo-400 bg-indigo-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            Reports
+                        </button>
+                        <button @click="nexusFilter.locations = !nexusFilter.locations"
+                                :class="nexusFilter.locations ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            Locations
+                        </button>
+                        <button @click="nexusFilter.people = !nexusFilter.people"
+                                :class="nexusFilter.people ? 'border-blue-500/60 text-blue-400 bg-blue-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            People
+                        </button>
+                        <button @click="nexusFilter.organizations = !nexusFilter.organizations"
+                                :class="nexusFilter.organizations ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-slate-700 text-slate-600'"
+                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
+                            Orgs
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Legend + stats (top left) -->
+                <div class="absolute top-6 left-6 z-10 bg-slate-900/60 backdrop-blur-md border border-slate-800 p-4 rounded-2xl pointer-events-none">
+                    <h3 class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Legend</h3>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-indigo-400" style="box-shadow:0 0 6px #818cf8"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">Reports</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500" style="box-shadow:0 0 6px #10b981"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">Locations</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-blue-500" style="box-shadow:0 0 6px #3b82f6"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">People</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-500" style="box-shadow:0 0 6px #f59e0b"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">Organizations</span>
+                        </div>
+                    </div>
+                    <template x-if="nexusStats.nodes > 0">
+                        <div class="mt-4 pt-3 border-t border-slate-800 space-y-1.5">
+                            <div class="flex justify-between gap-6">
+                                <span class="text-[8px] text-slate-600 uppercase">Nodes</span>
+                                <span class="text-[8px] font-mono text-slate-400" x-text="nexusStats.nodes"></span>
+                            </div>
+                            <div class="flex justify-between gap-6">
+                                <span class="text-[8px] text-slate-600 uppercase">Links</span>
+                                <span class="text-[8px] font-mono text-slate-400" x-text="nexusStats.links"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Selected node panel (bottom) -->
+                <div x-show="nexusSelectedNode"
+                     x-transition:enter="transition ease-out duration-200"
+                     x-transition:enter-start="opacity-0 translate-y-2"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-150"
+                     x-transition:leave-start="opacity-100 translate-y-0"
+                     x-transition:leave-end="opacity-0 translate-y-2"
+                     class="absolute bottom-0 left-0 right-0 z-20 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-6 py-4 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="w-3 h-3 rounded-full flex-shrink-0"
+                              :style="nexusSelectedNode ? { background: nexusSelectedNode.color, boxShadow: '0 0 8px ' + nexusSelectedNode.color } : {}">
+                        </span>
+                        <div class="min-w-0">
+                            <p class="text-sm font-bold text-white truncate" x-text="nexusSelectedNode?.name"></p>
+                            <p class="text-[9px] font-mono uppercase tracking-wider mt-0.5"
+                               :class="{
+                                   'text-indigo-400':  nexusSelectedNode?.type === 'report',
+                                   'text-emerald-400': nexusSelectedNode?.type === 'locations',
+                                   'text-blue-400':    nexusSelectedNode?.type === 'people',
+                                   'text-amber-400':   nexusSelectedNode?.type === 'organizations'
+                               }"
+                               x-text="nexusSelectedNode?.type">
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <template x-if="nexusSelectedNode?.type === 'report'">
+                            <button @click="viewMode = 'entries'; selectItem(nexusSelectedNode.id); nexusSelectedNode = null"
+                                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all">
+                                Open Report <i class="fa-solid fa-arrow-right text-[9px]"></i>
+                            </button>
+                        </template>
+                        <button @click="nexusSelectedNode = null"
+                                class="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-all">
+                            <i class="fa-solid fa-xmark text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Zoom controls (bottom right) -->
+                <div class="absolute bottom-6 right-6 z-20 flex flex-col gap-2">
+                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoom(NEXUS_ENGINE.zoom() * 1.5, 300)"
+                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all font-bold shadow-lg text-base leading-none">
+                        +
+                    </button>
+                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoom(NEXUS_ENGINE.zoom() / 1.5, 300)"
+                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all font-bold shadow-lg text-base leading-none">
+                        −
+                    </button>
+                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoomToFit(400)"
+                            title="Fit view"
+                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all shadow-lg">
+                        <i class="fa-solid fa-compress text-xs"></i>
+                    </button>
+                </div>
+
+                <div id="nexus-canvas" class="h-full w-full"></div>
             </div>
 
             <template x-if="!activeItem">

@@ -1,5 +1,4 @@
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.proxies import WebshareProxyConfig
 import requests
 import yt_dlp
 from supadata import Supadata
@@ -7,20 +6,24 @@ from datetime import datetime, timezone
 import time
 import concurrent.futures
 import logging
-from tasks.config import TASK_CONFIGS, MONGO_COLLECTIONS, GEN_AI_CLIENT, AI_MODEL, DOCUMENT, DOCUMENT_MAP, EXTRA_DOCUMENT_ARGS, PLAYLIST_FETCH_LIMIT, YOUTUBE_PLAYLIST_URL_TEMPLATE, YOUTUBE_PLAYLIST_IDS, EXECUTOR_WORKERS, INBETWEEN_TASK_SLEEP, RAPID_API_KEY, RAPID_API_HOST, RAPID_API_URL, SUPADATA_API_KEY
+from tasks.config import get_pipeline_config, GEN_AI_CLIENT, DOCUMENT, DOCUMENT_MAP, YOUTUBE_PLAYLIST_URL_TEMPLATE, RAPID_API_KEY, RAPID_API_HOST, RAPID_API_URL, SUPADATA_API_KEY
 
 class YouTubeLLMPipeline:
     def __init__(self, task_key="summarize"):
-        self.config = TASK_CONFIGS.get(task_key)
+        cfg = get_pipeline_config()
+        self.config = cfg['task_configs'].get(task_key)
         self.genai_client = GEN_AI_CLIENT
-        self.model = AI_MODEL
-        self.collection = MONGO_COLLECTIONS.get(task_key)
+        self.model = cfg['ai_model']
+        self.embedding_model = "gemini-embedding-001"
+        self.collection = cfg['mongo_collections'].get(task_key)
         self.category = task_key
         self.document_template = DOCUMENT.copy()
-        self.document_template.update(EXTRA_DOCUMENT_ARGS)
-        self.playlist_fetch_limit = "1-"+str(PLAYLIST_FETCH_LIMIT)
+        self.document_template.update(cfg['extra_document_args'])
+        self.playlist_fetch_limit = "1-" + str(cfg['playlist_fetch_limit'])
         self.playlist_url_template = YOUTUBE_PLAYLIST_URL_TEMPLATE
-        self.playlist_ids = YOUTUBE_PLAYLIST_IDS
+        self.playlist_ids = cfg['playlist_ids']
+        self.executor_workers = cfg['executor_workers']
+        self.sleep_time = cfg['sleep_time']
         self.processed_video_ids = set()
         self.rapid_api_key = RAPID_API_KEY
         self.rapid_api_host = RAPID_API_HOST
@@ -262,9 +265,9 @@ class YouTubeLLMPipeline:
         logging.info(f"Total videos fetched: {len(videos)}")
         videos.reverse()  # Process older videos first
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=EXECUTOR_WORKERS) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.executor_workers) as executor:
             executor.map(self.process_video, videos)
-            time.sleep(INBETWEEN_TASK_SLEEP)
+            time.sleep(self.sleep_time)
 
         if self.processed_video_ids:
             logging.info(f"Pipeline completed. Processed video IDs: {self.processed_video_ids}")
