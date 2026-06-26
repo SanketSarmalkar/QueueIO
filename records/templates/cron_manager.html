@@ -72,7 +72,7 @@
                 <thead>
                     <tr class="border-b border-slate-800 text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
                         <th class="text-left px-5 py-3">Name</th>
-                        <th class="text-left px-4 py-3">Task</th>
+                        <th class="text-left px-4 py-3">Type / Target</th>
                         <th class="text-left px-4 py-3">Schedule (UTC)</th>
                         <th class="text-left px-4 py-3">Last Run</th>
                         <th class="text-left px-4 py-3">Status</th>
@@ -84,7 +84,18 @@
                         <tr class="border-b border-slate-800/50 last:border-b-0 hover:bg-slate-800/30 transition-colors">
                             <td class="px-5 py-4 font-bold text-white" x-text="job.name"></td>
                             <td class="px-4 py-4">
-                                <span class="bg-indigo-500/20 text-indigo-300 font-mono text-[10px] px-2 py-0.5 rounded" x-text="job.task_key"></span>
+                                <template x-if="job.job_type === 'endpoint'">
+                                    <div class="flex flex-col gap-0.5">
+                                        <span class="bg-amber-500/20 text-amber-300 font-bold text-[9px] uppercase px-2 py-0.5 rounded w-fit">Endpoint</span>
+                                        <span class="font-mono text-[10px] text-slate-400 truncate max-w-[180px]" :title="job.endpoint_url" x-text="job.endpoint_url"></span>
+                                    </div>
+                                </template>
+                                <template x-if="job.job_type !== 'endpoint'">
+                                    <div class="flex flex-col gap-0.5">
+                                        <span class="bg-indigo-500/20 text-indigo-300 font-bold text-[9px] uppercase px-2 py-0.5 rounded w-fit">Pipeline</span>
+                                        <span class="font-mono text-[10px] text-slate-400" x-text="job.task_key"></span>
+                                    </div>
+                                </template>
                             </td>
                             <td class="px-4 py-4 font-mono text-slate-300" x-text="job.cron_expression"></td>
                             <td class="px-4 py-4 text-slate-500" x-text="job.last_run_at ? fmtDate(job.last_run_at) : '—'"></td>
@@ -147,13 +158,33 @@
                 <span x-text="editingId ? 'Edit Job' : 'New Cron Job'"></span>
             </h3>
             <div class="space-y-4">
+                <!-- Name -->
                 <div>
                     <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Name</label>
                     <input x-model="form.name" type="text"
                            class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none"
                            placeholder="Daily summarize">
                 </div>
+
+                <!-- Job Type toggle -->
                 <div>
+                    <label class="block text-[10px] font-bold uppercase text-slate-400 mb-2">Job Type</label>
+                    <div class="flex gap-2">
+                        <button @click="form.job_type = 'pipeline'"
+                                :class="form.job_type === 'pipeline' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'"
+                                class="flex-1 text-[10px] font-black uppercase py-2 rounded-lg transition-all flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-gear text-[9px]"></i> Pipeline
+                        </button>
+                        <button @click="form.job_type = 'endpoint'"
+                                :class="form.job_type === 'endpoint' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'"
+                                class="flex-1 text-[10px] font-black uppercase py-2 rounded-lg transition-all flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-bolt text-[9px]"></i> Endpoint
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Pipeline: task key select -->
+                <div x-show="form.job_type === 'pipeline'" x-transition>
                     <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Task Key</label>
                     <select x-model="form.task_key"
                             class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 rounded-lg px-3 py-2 text-xs text-white outline-none">
@@ -163,6 +194,27 @@
                         </template>
                     </select>
                 </div>
+
+                <!-- Endpoint: preset + custom URL -->
+                <div x-show="form.job_type === 'endpoint'" x-transition class="space-y-2">
+                    <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Endpoint</label>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        <template x-for="ep in endpointPresets" :key="ep.path">
+                            <button @click="form.endpoint_url = ep.path"
+                                    :class="form.endpoint_url === ep.path ? 'border-amber-500 bg-amber-500/10 text-amber-300' : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'"
+                                    class="text-left border rounded-lg px-3 py-2 transition-all">
+                                <div class="text-[10px] font-bold" x-text="ep.label"></div>
+                                <div class="font-mono text-[9px] text-slate-500 truncate" x-text="ep.path"></div>
+                            </button>
+                        </template>
+                    </div>
+                    <input x-model="form.endpoint_url" type="text"
+                           class="w-full bg-slate-800 border border-slate-700 focus:border-amber-500 rounded-lg px-3 py-2 text-xs font-mono text-white outline-none"
+                           placeholder="/tasks/queuei/summarize/">
+                    <p class="text-[10px] text-slate-600">Relative path — click a preset above or type a custom path.</p>
+                </div>
+
+                <!-- Cron expression -->
                 <div>
                     <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Cron Expression <span class="text-slate-600 normal-case font-normal">(UTC)</span></label>
                     <input x-model="form.cron_expression" type="text"
@@ -170,6 +222,8 @@
                            placeholder="0 8 * * *">
                     <p class="text-[10px] text-slate-600 mt-1 font-mono">minute hour day month weekday</p>
                 </div>
+
+                <!-- Active toggle -->
                 <div class="flex items-center gap-3">
                     <label class="text-[10px] font-bold uppercase text-slate-400">Active</label>
                     <button @click="form.is_active = !form.is_active"
@@ -182,7 +236,7 @@
             </div>
             <div class="flex gap-3 mt-6">
                 <button @click="saveJob()"
-                        :disabled="!form.name || !form.task_key || !form.cron_expression"
+                        :disabled="!form.name || !form.cron_expression || (form.job_type === 'pipeline' ? !form.task_key : !form.endpoint_url)"
                         class="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[10px] font-black uppercase tracking-widest py-2.5 rounded-lg transition-all">
                     <span x-text="editingId ? 'Update' : 'Create'"></span>
                 </button>
@@ -203,7 +257,7 @@
                 taskKeys: [],
                 showModal: false,
                 editingId: null,
-                form: { name: '', task_key: '', cron_expression: '', is_active: true },
+                form: { name: '', job_type: 'pipeline', task_key: '', endpoint_url: '', cron_expression: '', is_active: true },
                 toast: null,
                 examples: [
                     { expr: '0 */6 * * *',  label: 'Every 6 hours' },
@@ -213,12 +267,21 @@
                     { expr: '0 0 1 * *',    label: 'Monthly (1st)' },
                     { expr: '*/30 * * * *', label: 'Every 30 minutes' },
                 ],
+                endpointPresets: [
+                    { label: 'Slack Alert',        path: '/tasks/alert/' },
+                    { label: 'Playlist Fix',       path: '/tasks/playlist_fix/' },
+                    { label: 'Backfill Entities',  path: '/tasks/backfill_entities/' },
+                ],
 
                 init() {
                     const jobsEl = document.getElementById('jobs-data');
                     const keysEl = document.getElementById('task-keys-data');
                     this.jobs = jobsEl ? JSON.parse(jobsEl.textContent) : [];
                     this.taskKeys = keysEl ? JSON.parse(keysEl.textContent) : [];
+                    // Build pipeline endpoint presets from task keys
+                    for (const key of this.taskKeys) {
+                        this.endpointPresets.push({ label: `Pipeline: ${key}`, path: `/tasks/queuei/${key}/` });
+                    }
                 },
 
                 fmtDate(iso) {
@@ -229,7 +292,7 @@
 
                 openCreate() {
                     this.editingId = null;
-                    this.form = { name: '', task_key: '', cron_expression: '', is_active: true };
+                    this.form = { name: '', job_type: 'pipeline', task_key: '', endpoint_url: '', cron_expression: '', is_active: true };
                     this.showModal = true;
                 },
 
@@ -237,7 +300,9 @@
                     this.editingId = job.id;
                     this.form = {
                         name: job.name,
+                        job_type: job.job_type || 'pipeline',
                         task_key: job.task_key,
+                        endpoint_url: job.endpoint_url || '',
                         cron_expression: job.cron_expression,
                         is_active: job.is_active,
                     };

@@ -20,8 +20,14 @@ class GlobalSetting(models.Model):
 
 
 class CronJob(models.Model):
+    JOB_TYPE_PIPELINE = 'pipeline'
+    JOB_TYPE_ENDPOINT = 'endpoint'
+    JOB_TYPE_CHOICES = [('pipeline', 'Pipeline'), ('endpoint', 'Endpoint')]
+
     name = models.CharField(max_length=100)
-    task_key = models.CharField(max_length=50, help_text="Must match an active TaskConfiguration key")
+    job_type = models.CharField(max_length=20, choices=JOB_TYPE_CHOICES, default='pipeline')
+    task_key = models.CharField(max_length=50, blank=True, help_text="Must match an active TaskConfiguration key")
+    endpoint_url = models.CharField(max_length=500, blank=True, default='', help_text="Relative path, e.g. /tasks/alert/")
     cron_expression = models.CharField(max_length=100, help_text="5-part cron: minute hour day month weekday")
     is_active = models.BooleanField(default=True)
     last_run_at = models.DateTimeField(null=True, blank=True)

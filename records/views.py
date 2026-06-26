@@ -382,9 +382,12 @@ def cron_manager_view(request):
             action = data.get('action')
 
             if action == 'create':
+                job_type = data.get('job_type', 'pipeline')
                 job = CronJob.objects.create(
                     name=data['name'].strip(),
-                    task_key=data['task_key'].strip(),
+                    job_type=job_type,
+                    task_key=data.get('task_key', '').strip(),
+                    endpoint_url=data.get('endpoint_url', '').strip(),
                     cron_expression=data['cron_expression'].strip(),
                     is_active=data.get('is_active', True),
                 )
@@ -395,7 +398,9 @@ def cron_manager_view(request):
             elif action == 'update':
                 job = CronJob.objects.get(id=data['id'])
                 job.name = data.get('name', job.name).strip()
+                job.job_type = data.get('job_type', job.job_type)
                 job.task_key = data.get('task_key', job.task_key).strip()
+                job.endpoint_url = data.get('endpoint_url', job.endpoint_url).strip()
                 job.cron_expression = data.get('cron_expression', job.cron_expression).strip()
                 job.is_active = data.get('is_active', job.is_active)
                 job.save()
@@ -418,14 +423,25 @@ def cron_manager_view(request):
                 return JsonResponse({'status': 'success'})
 
             elif action == 'run_now':
-                from tasks.scheduler import run_pipeline_job
-                t = threading.Thread(
-                    target=run_pipeline_job,
-                    args=[data['task_key'], data['id']],
-                    daemon=True,
-                )
-                t.start()
-                return JsonResponse({'status': 'success', 'message': f"Pipeline '{data['task_key']}' triggered"})
+                job = CronJob.objects.get(id=data['id'])
+                if job.job_type == 'endpoint':
+                    from tasks.scheduler import run_endpoint_job
+                    t = threading.Thread(
+                        target=run_endpoint_job,
+                        args=[job.endpoint_url, job.id],
+                        daemon=True,
+                    )
+                    t.start()
+                    return JsonResponse({'status': 'success', 'message': f"Endpoint '{job.endpoint_url}' triggered"})
+                else:
+                    from tasks.scheduler import run_pipeline_job
+                    t = threading.Thread(
+                        target=run_pipeline_job,
+                        args=[job.task_key, job.id],
+                        daemon=True,
+                    )
+                    t.start()
+                    return JsonResponse({'status': 'success', 'message': f"Pipeline '{job.task_key}' triggered"})
 
         except CronJob.DoesNotExist:
             return JsonResponse({'status': 'error', 'message': 'Job not found'}, status=404)
@@ -445,7 +461,9 @@ def _serialize_job(job):
     return {
         'id': job.id,
         'name': job.name,
+        'job_type': job.job_type,
         'task_key': job.task_key,
+        'endpoint_url': job.endpoint_url,
         'cron_expression': job.cron_expression,
         'is_active': job.is_active,
         'last_run_at': job.last_run_at.isoformat() if job.last_run_at else None,
