@@ -34,6 +34,7 @@
                 chatQuery: '',
                 chatLoading: false,
                 chatMessages: [],
+                chatHistory: [],
                 showNewTaskModal: false,
                 newTask: { 
                     task_key: '', display_name: '', prompt_template: '', 
@@ -46,6 +47,18 @@
                 hasMore: false,
                 nextOffset: 50,
                 loadingMore: false,
+                searchResults: [],
+                searchLoading: false,
+                isSearchMode: false,
+                _searchTimer: null,
+                relatedReports: [],
+                relatedLoading: false,
+                bookmarkedIds: {},
+                showBookmarksOnly: false,
+                insightsData: null,
+                insightsLoading: false,
+                usageData: null,
+                usageLoading: false,
                 hoverNode: null,
                 nexusLoading: false,
                 nexusMouseX: 0,
@@ -84,6 +97,18 @@
                             }
                         });
                         
+                        this.$watch('searchQuery', (val) => {
+                            clearTimeout(this._searchTimer);
+                            if (val.length > 2) {
+                                this.searchLoading = true;
+                                this._searchTimer = setTimeout(() => this.doSearch(val), 450);
+                            } else {
+                                this.isSearchMode = false;
+                                this.searchResults = [];
+                                this.searchLoading = false;
+                            }
+                        });
+
                         this.$watch('nexusQuery', (value) => {
                             if (!NEXUS_ENGINE) return;
                             const term = value.toLowerCase().trim();
@@ -99,6 +124,14 @@
                             }
                         });
                 
+                        fetch('/bookmarks/')
+                            .then(r => r.json())
+                            .then(d => {
+                                const map = {};
+                                (d.ids || []).forEach(id => { map[id] = true; });
+                                this.bookmarkedIds = map;
+                            }).catch(() => {});
+
                         console.log("✅ System Initialized and Watchers Active.");
                     } catch (e) {
                         print("❌ Initialization Error:", e);
@@ -109,6 +142,15 @@
                     this.selectedId = id;
                     this.viewMode = 'entries';
                     if (window.innerWidth < 768) this.sidebarOpen = false;
+
+                    // Fetch related reports in parallel — reset immediately so old results don't flash
+                    this.relatedReports = [];
+                    this.relatedLoading = true;
+                    fetch(`/related/${id}/`)
+                        .then(r => r.json())
+                        .then(d => { this.relatedReports = d.items || []; })
+                        .catch(() => {})
+                        .finally(() => { this.relatedLoading = false; });
 
                     // If item isn't in the loaded set (e.g. opened from Nexus map), add a stub
                     if (!this.items.find(i => i.id === id)) {
@@ -173,7 +215,35 @@
                     }
                 },
     
+                async toggleBookmark(id, title) {
+                    const resp = await fetch('/bookmark/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                        body: JSON.stringify({ report_id: id, title }),
+                    });
+                    const data = await resp.json();
+                    const updated = { ...this.bookmarkedIds };
+                    if (data.bookmarked) updated[id] = true;
+                    else delete updated[id];
+                    this.bookmarkedIds = updated;
+                },
+
+                async doSearch(q) {
+                    try {
+                        const resp = await fetch(`/search/?q=${encodeURIComponent(q)}`);
+                        const data = await resp.json();
+                        this.searchResults = data.items;
+                        this.isSearchMode = true;
+                    } catch(e) {
+                        this.searchResults = [];
+                    } finally {
+                        this.searchLoading = false;
+                    }
+                },
+
                 get filteredItems() {
+                    if (this.isSearchMode) return this.searchResults;
+                    if (this.showBookmarksOnly) return this.items.filter(i => this.bookmarkedIds[i.id]);
                     return this.items.filter(i => {
                         const matchesSearch = i.title.toLowerCase().includes(this.searchQuery.toLowerCase());
                         const itemPid = i.playlist_id || 'unassigned';
@@ -186,11 +256,25 @@
                     return this.items.find(i => i.id === this.selectedId) || null; 
                 },
     
-                openStack(id) {
+                async openStack(id) {
                     this.selectedPlaylistId = id;
                     this.viewMode = 'entries';
                     const first = this.items.find(i => (i.playlist_id || 'unassigned') === id);
-                    if (first) this.selectItem(first.id);
+                    if (first) {
+                        this.selectItem(first.id);
+                        return;
+                    }
+                    // No items for this playlist loaded yet — fetch the first page
+                    if (id === 'unassigned') return;
+                    try {
+                        const resp = await fetch(`/records/?offset=0&playlist_id=${encodeURIComponent(id)}`);
+                        const data = await resp.json();
+                        const existingIds = new Set(this.items.map(i => i.id));
+                        const newItems = (data.items || []).filter(i => !existingIds.has(i.id));
+                        this.items.push(...newItems);
+                        const loaded = this.items.find(i => (i.playlist_id || 'unassigned') === id);
+                        if (loaded) this.selectItem(loaded.id);
+                    } catch(e) {}
                 },
     
                 goBackToStacks() {
@@ -217,19 +301,19 @@
                     } catch (e) { alert('UPLINK FAILED.'); }
                 },
 
-                async sendChatQuery() {
-                    if (!this.chatQuery.trim() || this.chatLoading) return;
-                    
+                async sendChatQuery(prefill) {
+                    const q = (prefill || this.chatQuery).trim();
+                    if (!q || this.chatLoading) return;
+
                     this.chatLoading = true;
-                    const userMsg = this.chatQuery;
-                    this.chatMessages.push({ role: 'user', text: userMsg });
+                    this.chatMessages.push({ role: 'user', text: q });
                     this.chatQuery = '';
-                
-                    this.$nextTick(() => { 
+
+                    this.$nextTick(() => {
                         const el = document.getElementById('chat-scroll');
                         if (el) el.scrollTop = el.scrollHeight;
                     });
-                
+
                     try {
                         const response = await fetch('/intel-chat/', {
                             method: 'POST',
@@ -237,18 +321,23 @@
                                 'Content-Type': 'application/json',
                                 'X-CSRFToken': '{{ csrf_token }}'
                             },
-                            body: JSON.stringify({ query: userMsg })
+                            body: JSON.stringify({ query: q, history: this.chatHistory })
                         });
-                        
+
                         const data = await response.json();
-                        
-                        const parsedText = typeof marked !== 'undefined' ? marked.parse(data.answer) : data.answer;
-                        
-                        this.chatMessages.push({ 
-                            role: 'ai', 
-                            text: parsedText, 
+                        const rawAnswer = data.answer || '';
+                        const parsedText = typeof marked !== 'undefined' ? marked.parse(rawAnswer) : rawAnswer;
+
+                        this.chatMessages.push({
+                            role: 'ai',
+                            text: parsedText,
                             sources: data.sources || []
                         });
+
+                        // Store plain-text turns for history (strip HTML tags for the context)
+                        this.chatHistory.push({ role: 'user', text: q });
+                        this.chatHistory.push({ role: 'ai', text: rawAnswer });
+                        if (this.chatHistory.length > 12) this.chatHistory = this.chatHistory.slice(-12);
                     } catch (e) {
                         this.chatMessages.push({ role: 'ai', text: 'SYSTEM ERROR: Intelligence uplink failed.' });
                     } finally {
@@ -405,6 +494,31 @@
                     }
                 },
 
+                async loadInsights() {
+                    if (this.insightsData) return;
+                    this.insightsLoading = true;
+                    try {
+                        const r = await fetch('/entity-stats/');
+                        this.insightsData = await r.json();
+                    } catch(e) {
+                        this.insightsData = { people: [], locations: [], organizations: [] };
+                    } finally {
+                        this.insightsLoading = false;
+                    }
+                },
+
+                async loadUsage() {
+                    this.usageLoading = true;
+                    try {
+                        const r = await fetch('/usage-stats/');
+                        this.usageData = await r.json();
+                    } catch(e) {
+                        this.usageData = null;
+                    } finally {
+                        this.usageLoading = false;
+                    }
+                },
+
                 onMainScroll(event) {
                     if (this.viewMode !== 'entries') { this.readingProgress = 0; return; }
                     const el = event.target;
@@ -499,6 +613,16 @@
                     <i class="fa-solid fa-rotate text-[9px]" :class="nexusLoading && 'animate-spin'"></i>
                 </button>
             </div>
+            <button @click="viewMode = 'insights'; loadInsights()"
+                    :class="viewMode === 'insights' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
+                <i class="fa-solid fa-chart-bar text-[9px]"></i> Insights
+            </button>
+            <button @click="viewMode = 'usage'; loadUsage()"
+                    :class="viewMode === 'usage' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
+                <i class="fa-solid fa-gauge-high text-[9px]"></i> Usage
+            </button>
             {% if user.is_superuser %}
             <button @click="viewMode = 'command'"
                     :class="viewMode === 'command' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
@@ -571,10 +695,46 @@
         >
             <div class="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
                 <div class="relative">
-                    <i class="fa-solid fa-search absolute left-3 top-3 text-slate-400 text-xs"></i>
-                    <input type="text" x-model="searchQuery" placeholder="Search archive..." 
-                           class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-4 text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all">
+                    <template x-if="searchLoading">
+                        <i class="fa-solid fa-circle-notch absolute left-3 top-2.5 text-indigo-400 text-xs animate-spin"></i>
+                    </template>
+                    <template x-if="!searchLoading">
+                        <i class="fa-solid fa-search absolute left-3 top-2.5 text-slate-400 text-xs" :class="isSearchMode && 'text-indigo-400'"></i>
+                    </template>
+                    <input type="text" x-model="searchQuery" placeholder="Search titles & content..."
+                           class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-8 text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                           :class="isSearchMode && 'border-indigo-400/50 dark:border-indigo-500/40'">
+                    <button x-show="searchQuery.length > 0"
+                            @click="searchQuery = ''; isSearchMode = false; searchResults = []"
+                            class="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-0.5">
+                        <i class="fa-solid fa-xmark text-xs"></i>
+                    </button>
                 </div>
+                <!-- Search mode indicator -->
+                <div x-show="isSearchMode" x-transition class="mt-2 flex items-center justify-between">
+                    <span class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-wider">
+                        <i class="fa-solid fa-database mr-1"></i>Content search
+                    </span>
+                    <span class="text-[9px] font-mono text-slate-400 dark:text-slate-600"
+                          x-text="searchResults.length + ' result' + (searchResults.length !== 1 ? 's' : '')"></span>
+                </div>
+            </div>
+
+            <!-- Filter tabs: All / Saved -->
+            <div class="flex items-center gap-1 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                <button @click="showBookmarksOnly = false"
+                        :class="!showBookmarksOnly ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200' : 'text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400'"
+                        class="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all">
+                    <i class="fa-solid fa-layer-group text-[8px]"></i> All
+                </button>
+                <button @click="showBookmarksOnly = true"
+                        :class="showBookmarksOnly ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400'"
+                        class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all">
+                    <i class="fa-solid fa-bookmark text-[8px]"></i> Saved
+                    <span x-show="Object.keys(bookmarkedIds).length > 0"
+                          class="bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[8px] font-mono px-1 rounded"
+                          x-text="Object.keys(bookmarkedIds).length"></span>
+                </button>
             </div>
             
             <div id="sidebar-scroll" class="flex-1 overflow-y-auto custom-scrollbar">
@@ -585,6 +745,9 @@
                             : 'border-l-[3px] border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/40'"
                          class="px-4 py-3.5 cursor-pointer border-b border-slate-50 dark:border-slate-800/60 transition-all duration-150 group">
                         <div class="flex items-center justify-between mb-1.5">
+                            <template x-if="bookmarkedIds[item.id]">
+                                <i class="fa-solid fa-bookmark text-amber-400 text-[8px] mr-1 shrink-0"></i>
+                            </template>
                             <span class="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded"
                                   :class="{
                                     'bg-indigo-100 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400': categoryColor(item.category) === 'indigo',
@@ -601,6 +764,15 @@
                             x-text="item.title"></h4>
                     </div>
                 </template>
+                <!-- Empty bookmarks state -->
+                <div x-show="showBookmarksOnly && Object.keys(bookmarkedIds).length === 0"
+                     class="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
+                    <i class="fa-regular fa-bookmark text-slate-300 dark:text-slate-700 text-3xl"></i>
+                    <p class="text-[10px] font-mono text-slate-400 dark:text-slate-600 leading-relaxed">
+                        No saved reports yet.<br>Tap the bookmark icon while reading to save.
+                    </p>
+                </div>
+
                 <div id="scroll-sentinel" class="h-1"></div>
                 <div x-show="loadingMore" class="py-4 text-center">
                     <span class="text-[9px] font-mono text-slate-400 dark:text-slate-700 animate-pulse uppercase tracking-widest">Loading...</span>
@@ -613,41 +785,75 @@
                 <div class="h-full flex flex-col bg-slate-50 dark:bg-slate-950 relative pb-14 md:pb-0">
 
                     <div class="absolute top-3 right-3 md:top-4 md:right-6 z-10 flex gap-2">
-                        <button @click="chatMessages = []"
+                        <button @click="chatMessages = []; chatHistory = []"
                                 class="bg-slate-900/50 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-lg text-[9px] font-black text-slate-500 hover:text-red-400 transition-all uppercase tracking-widest">
                             <i class="fa-solid fa-trash-can mr-1"></i> Clear Terminal
                         </button>
                     </div>
 
-                    <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 space-y-8 md:space-y-10 custom-scrollbar">
+                    <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 custom-scrollbar">
+
+                        <!-- Empty state with starter prompts -->
+                        <template x-if="chatMessages.length === 0 && !chatLoading">
+                            <div class="h-full flex flex-col items-center justify-center gap-8 py-12">
+                                <div class="text-center space-y-2">
+                                    <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4">
+                                        <i class="fa-solid fa-bolt-lightning text-indigo-500 text-xl"></i>
+                                    </div>
+                                    <h3 class="text-sm font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Intel Chat</h3>
+                                    <p class="text-xs text-slate-400 font-mono">RAG-powered search across your entire archive</p>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
+                                    <template x-for="prompt in [
+                                        'What are the most discussed topics recently?',
+                                        'Summarise key events involving India this week',
+                                        'Which organisations appear most frequently?',
+                                        'What geopolitical risks are emerging?',
+                                        'Find reports about economic policy changes',
+                                        'What are the latest developments in the archive?'
+                                    ]" :key="prompt">
+                                        <button @click="sendChatQuery(prompt)"
+                                                class="text-left bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/40 dark:hover:border-indigo-500/40 rounded-xl px-4 py-3 text-[11px] text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all group">
+                                            <i class="fa-solid fa-arrow-right text-[8px] mr-2 text-slate-300 dark:text-slate-700 group-hover:text-indigo-500 transition-colors"></i>
+                                            <span x-text="prompt"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <div class="space-y-8 md:space-y-10">
                         <template x-for="(msg, index) in chatMessages" :key="index">
                             <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
-                                
-                                <span class="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2 px-2" 
+
+                                <span class="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2 px-2"
                                       x-text="msg.role === 'user' ? 'Operator Query' : 'System Intelligence'"></span>
-            
-                                <div :class="msg.role === 'user' 
-                                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-2xl shadow-indigo-500/20 px-5 py-3 md:px-6 md:py-4' 
+
+                                <div :class="msg.role === 'user'
+                                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-2xl shadow-indigo-500/20 px-5 py-3 md:px-6 md:py-4'
                                     : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none shadow-xl p-6 md:p-8'"
-                                    class="max-w-[85%] relative group">
-                                    
+                                    class="max-w-[85%] relative">
+
                                     <template x-if="msg.role === 'ai'">
                                         <div class="absolute top-0 left-0 w-1 h-full bg-indigo-500 rounded-tl-2xl"></div>
                                     </template>
-                                    
+
                                     <div class="prose prose-sm dark:prose-invert leading-relaxed" x-html="msg.text"></div>
-            
+
                                     <template x-if="msg.sources && msg.sources.length > 0">
-                                        <div class="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
-                                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
-                                                <i class="fa-solid fa-link text-indigo-500"></i> Verified Intelligence Anchors
+                                        <div class="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
+                                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
+                                                <i class="fa-solid fa-link text-indigo-500"></i> Sources
                                             </p>
                                             <div class="flex flex-wrap gap-2">
-                                                <template x-for="src in msg.sources">
-                                                    <button @click="jumpToSource(src)" 
-                                                            class="bg-indigo-500/5 hover:bg-indigo-500/20 border border-indigo-500/20 px-3 py-1.5 rounded-md text-[9px] font-bold text-indigo-400 transition-all flex items-center gap-2 group/btn">
-                                                        <span x-text="src.title"></span>
-                                                        <i class="fa-solid fa-arrow-up-right-from-square opacity-0 group-hover/btn:opacity-100 transition-opacity"></i>
+                                                <template x-for="src in msg.sources" :key="src.id">
+                                                    <button @click="jumpToSource(src)"
+                                                            class="bg-indigo-500/5 hover:bg-indigo-500/15 border border-indigo-500/20 px-3 py-2 rounded-lg transition-all flex flex-col items-start gap-0.5 group/btn text-left">
+                                                        <span class="text-[10px] font-semibold text-indigo-400 group-hover/btn:text-indigo-300 leading-tight" x-text="src.title"></span>
+                                                        <div class="flex items-center gap-2">
+                                                            <span x-show="src.playlist_title" class="text-[8px] font-mono text-slate-500" x-text="src.playlist_title"></span>
+                                                            <span x-show="src.date" class="text-[8px] font-mono text-slate-600" x-text="src.date"></span>
+                                                        </div>
                                                     </button>
                                                 </template>
                                             </div>
@@ -656,29 +862,39 @@
                                 </div>
                             </div>
                         </template>
-            
+
                         <div x-show="chatLoading" class="flex flex-col gap-4 animate-pulse">
                             <div class="flex items-center gap-3 text-indigo-500 font-mono text-[9px] tracking-[0.3em]">
                                 <i class="fa-solid fa-microchip animate-spin"></i> CROSS-REFERENCING ARCHIVE...
                             </div>
                             <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
                         </div>
+                        </div>
                     </div>
-            
+
                     <div class="p-4 md:p-8 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
-                        <div class="max-w-5xl mx-auto relative">
-                            <input
-                                type="text"
-                                x-model="chatQuery"
-                                @keyup.enter.prevent="sendChatQuery()"
-                                placeholder="Ask about entities, reports, or topics..."
-                                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-3 md:py-5 pl-5 md:pl-8 pr-14 md:pr-20 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-inner font-medium"
-                            >
-                            <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                                <span class="text-[8px] font-black text-slate-500 uppercase mr-2 hidden md:block">Press Enter ↵</span>
-                                <button @click="sendChatQuery()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center">
-                                    <i class="fa-solid fa-bolt-lightning text-xs"></i>
-                                </button>
+                        <div class="max-w-5xl mx-auto">
+                            <!-- History indicator -->
+                            <div x-show="chatHistory.length > 0" class="flex items-center gap-2 mb-2 px-1">
+                                <span class="text-[8px] font-mono text-indigo-500/70 uppercase tracking-widest">
+                                    <i class="fa-solid fa-circle-nodes mr-1"></i>
+                                    <span x-text="Math.floor(chatHistory.length / 2) + ' turn' + (chatHistory.length > 2 ? 's' : '') + ' in context'"></span>
+                                </span>
+                            </div>
+                            <div class="relative">
+                                <input
+                                    type="text"
+                                    x-model="chatQuery"
+                                    @keyup.enter.prevent="sendChatQuery()"
+                                    placeholder="Ask a follow-up or start a new query..."
+                                    class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-3 md:py-5 pl-5 md:pl-8 pr-14 md:pr-20 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-inner font-medium"
+                                >
+                                <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                    <span class="text-[8px] font-black text-slate-500 uppercase mr-2 hidden md:block">Enter ↵</span>
+                                    <button @click="sendChatQuery()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center">
+                                        <i class="fa-solid fa-bolt-lightning text-xs"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -717,10 +933,24 @@
                                 <div @click="openStack(stack.id)"
                                      class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:border-indigo-400/50 dark:hover:border-slate-600 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:shadow-black/40 hover:-translate-y-1">
 
-                                    <!-- Colored top accent bar -->
-                                    <div class="h-[3px] w-full"
-                                         :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
-                                    </div>
+                                    <!-- Thumbnail header or accent bar -->
+                                    <template x-if="stack.thumbnail_key">
+                                        <div class="relative overflow-hidden" style="height: 130px;">
+                                            <img :src="`https://i.ytimg.com/vi/${stack.thumbnail_key}/mqdefault.jpg`"
+                                                 :alt="stack.title"
+                                                 class="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                                                 loading="lazy">
+                                            <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
+                                            <div class="absolute inset-x-0 top-0 h-[3px]"
+                                                 :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="!stack.thumbnail_key">
+                                        <div class="h-[3px] w-full"
+                                             :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
+                                        </div>
+                                    </template>
 
                                     <div class="p-6">
                                         <!-- Icon + ID row -->
@@ -783,9 +1013,18 @@
                             </template>
                         </div>
 
-                        <!-- Title -->
-                        <h1 class="text-2xl md:text-4xl font-black text-slate-900 dark:text-white leading-[1.1] mb-3"
-                            x-text="activeItem.title"></h1>
+                        <!-- Title + bookmark -->
+                        <div class="flex items-start gap-3 mb-3">
+                            <h1 class="flex-1 text-2xl md:text-4xl font-black text-slate-900 dark:text-white leading-[1.1]"
+                                x-text="activeItem.title"></h1>
+                            <button @click="toggleBookmark(activeItem.id, activeItem.title)"
+                                    :class="bookmarkedIds[activeItem.id] ? 'text-amber-500 hover:text-amber-400' : 'text-slate-300 dark:text-slate-700 hover:text-amber-400 dark:hover:text-amber-500'"
+                                    class="shrink-0 mt-1 md:mt-2 transition-colors p-1 rounded-lg"
+                                    :title="bookmarkedIds[activeItem.id] ? 'Remove bookmark' : 'Save report'">
+                                <i :class="bookmarkedIds[activeItem.id] ? 'fa-solid fa-bookmark' : 'fa-regular fa-bookmark'"
+                                   class="text-lg md:text-xl"></i>
+                            </button>
+                        </div>
                         <p class="text-[10px] font-mono text-slate-400 dark:text-slate-600 mb-8 uppercase tracking-widest"
                            x-text="'Ref: ' + activeItem.key"></p>
 
@@ -794,6 +1033,16 @@
                             <div class="h-[3px] w-16 bg-indigo-500 rounded-full"></div>
                             <div class="h-[1px] flex-1 bg-slate-100 dark:bg-slate-800"></div>
                         </div>
+
+                        <!-- Video thumbnail -->
+                        <template x-if="activeItem.key">
+                            <div class="mb-8 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 shadow-sm">
+                                <img :src="`https://i.ytimg.com/vi/${activeItem.key}/hqdefault.jpg`"
+                                     :alt="activeItem.title"
+                                     class="w-full object-cover"
+                                     loading="lazy">
+                            </div>
+                        </template>
 
                         <!-- Entity chips -->
                         <div class="flex flex-wrap gap-1.5 mb-10"
@@ -835,6 +1084,41 @@
                                 </div>
                             </template>
                         </article>
+
+                        <!-- Related Reports -->
+                        <div x-show="relatedReports.length > 0 || relatedLoading" class="mt-14">
+                            <div class="flex items-center gap-3 mb-5">
+                                <div class="h-[1px] w-8 bg-slate-200 dark:bg-slate-800"></div>
+                                <p class="text-[9px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-[0.25em] whitespace-nowrap">
+                                    <i class="fa-solid fa-circle-nodes mr-1.5 text-indigo-400"></i>Related Reports
+                                </p>
+                                <div class="h-[1px] flex-1 bg-slate-100 dark:bg-slate-800"></div>
+                            </div>
+
+                            <!-- Skeleton while loading -->
+                            <div x-show="relatedLoading" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse"></div>
+                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse"></div>
+                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse sm:block hidden"></div>
+                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse sm:block hidden"></div>
+                            </div>
+
+                            <!-- Results -->
+                            <div x-show="!relatedLoading" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <template x-for="rel in relatedReports" :key="rel.id">
+                                    <button @click="selectItem(rel.id)"
+                                            class="text-left p-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:border-indigo-400/40 dark:hover:border-slate-600 hover:bg-white dark:hover:bg-slate-800/60 transition-all group">
+                                        <div class="flex items-center gap-2 mb-1.5">
+                                            <span class="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 dark:text-indigo-400"
+                                                  x-text="rel.category"></span>
+                                            <span class="text-[9px] font-mono text-slate-400 dark:text-slate-600 ml-auto" x-text="rel.date_display"></span>
+                                        </div>
+                                        <p class="text-xs font-semibold text-slate-700 dark:text-slate-300 leading-snug line-clamp-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors"
+                                           x-text="rel.title"></p>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
 
                         <!-- Footer -->
                         <div class="mt-16 pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[9px] font-mono text-slate-400 dark:text-slate-700 uppercase tracking-widest">
@@ -1138,6 +1422,404 @@
                 <div id="nexus-canvas" class="h-full w-full"></div>
             </div>
 
+            <!-- ── Usage view ────────────────────────────────────────────── -->
+            <template x-if="viewMode === 'usage'">
+                <div class="flex-1 overflow-y-auto custom-scrollbar pb-14 md:pb-0">
+                    <div class="max-w-4xl mx-auto px-4 md:px-8 py-6 md:py-10">
+
+                        <!-- Header -->
+                        <div class="flex items-center justify-between mb-8">
+                            <div>
+                                <h1 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight">API Usage</h1>
+                                <p class="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">Gemini API — today's consumption vs. free-tier limits</p>
+                            </div>
+                            <button @click="loadUsage()"
+                                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-all border border-slate-200 dark:border-slate-800">
+                                <i class="fa-solid fa-rotate text-[9px]" :class="usageLoading && 'animate-spin'"></i>
+                                Refresh
+                            </button>
+                        </div>
+
+                        <!-- Loading -->
+                        <template x-if="usageLoading">
+                            <div class="space-y-4 animate-pulse">
+                                <div class="h-28 bg-slate-100 dark:bg-slate-800 rounded-2xl"></div>
+                                <div class="h-28 bg-slate-100 dark:bg-slate-800 rounded-2xl"></div>
+                            </div>
+                        </template>
+
+                        <template x-if="!usageLoading && usageData">
+                            <div>
+
+                            <!-- ── Today's KPIs ── -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Requests today</span>
+                                    <span class="text-3xl font-black text-slate-800 dark:text-slate-100" x-text="(usageData.today.total_requests || 0).toLocaleString()"></span>
+                                    <span class="text-[9px] text-slate-400 font-mono" x-text="'of ' + (usageData.limits?.rpd || 1500).toLocaleString() + ' limit'"></span>
+                                </div>
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Tokens today</span>
+                                    <span class="text-3xl font-black text-indigo-500" x-text="(usageData.today.total_tokens || 0).toLocaleString()"></span>
+                                    <span class="text-[9px] text-slate-400 font-mono">of 1M limit</span>
+                                </div>
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Generate calls</span>
+                                    <span class="text-3xl font-black text-purple-500" x-text="(usageData.today.generate_requests || 0)"></span>
+                                    <span class="text-[9px] text-slate-400 font-mono" x-text="(usageData.today.generate_tokens || 0).toLocaleString() + ' tokens'"></span>
+                                </div>
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Embed calls</span>
+                                    <span class="text-3xl font-black text-teal-500" x-text="(usageData.today.embed_requests || 0)"></span>
+                                    <span class="text-[9px] text-slate-400 font-mono" x-text="(usageData.today.embed_tokens || 0).toLocaleString() + ' tokens'"></span>
+                                </div>
+                            </div>
+
+                            <!-- ── Progress bars ── -->
+                            <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 mb-6 space-y-5">
+                                <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Daily Limits (Free Tier)</h2>
+
+                                <!-- Requests / day -->
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-2">
+                                        <span class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Requests / day</span>
+                                        <span class="text-[10px] font-mono text-slate-500"
+                                              x-text="(usageData.today.total_requests || 0) + ' / ' + (usageData.limits?.rpd || 1500)"></span>
+                                    </div>
+                                    <div class="h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full rounded-full transition-all duration-700"
+                                             :class="(usageData.today.total_requests / (usageData.limits?.rpd || 1500)) > 0.85 ? 'bg-rose-500' : 'bg-indigo-500'"
+                                             :style="'width:' + Math.min(100, Math.round((usageData.today.total_requests || 0) / (usageData.limits?.rpd || 1500) * 100)) + '%'"></div>
+                                    </div>
+                                    <span class="text-[9px] font-mono text-slate-400 mt-1 block"
+                                          x-text="Math.min(100, Math.round((usageData.today.total_requests || 0) / (usageData.limits?.rpd || 1500) * 100)) + '% used'"></span>
+                                </div>
+
+                                <!-- Tokens / day -->
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-2">
+                                        <span class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Tokens / day</span>
+                                        <span class="text-[10px] font-mono text-slate-500"
+                                              x-text="(usageData.today.total_tokens || 0).toLocaleString() + ' / 1,000,000'"></span>
+                                    </div>
+                                    <div class="h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full rounded-full transition-all duration-700"
+                                             :class="(usageData.today.total_tokens / 1000000) > 0.85 ? 'bg-rose-500' : 'bg-purple-500'"
+                                             :style="'width:' + Math.min(100, Math.round((usageData.today.total_tokens || 0) / 1000000 * 100)) + '%'"></div>
+                                    </div>
+                                    <span class="text-[9px] font-mono text-slate-400 mt-1 block"
+                                          x-text="Math.min(100, Math.round((usageData.today.total_tokens || 0) / 1000000 * 100)) + '% used'"></span>
+                                </div>
+                            </div>
+
+                            <!-- ── Source breakdown + 7-day chart ── -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                                <!-- Source breakdown -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-5">Source breakdown</h2>
+                                    <div class="space-y-3">
+                                        <template x-for="[src, stats] in Object.entries(usageData.source_breakdown || {})" :key="src">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 capitalize" x-text="src.replace(/_/g,' ')"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400" x-text="stats.requests + ' req · ' + (stats.tokens || 0).toLocaleString() + ' tok'"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-indigo-500 rounded-full"
+                                                         :style="'width:' + Math.round(stats.requests / Math.max(...Object.values(usageData.source_breakdown).map(s => s.requests)) * 100) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <template x-if="Object.keys(usageData.source_breakdown || {}).length === 0">
+                                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No calls logged yet today</p>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- 7-day chart -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-5">Last 7 days</h2>
+                                    <div class="space-y-2">
+                                        <template x-for="day in (usageData.daily || [])" :key="day.date">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[10px] font-mono text-slate-500 dark:text-slate-400 w-14 shrink-0" x-text="day.date"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400 ml-2 shrink-0" x-text="day.requests + ' req'"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                                                         :style="'width:' + (day.requests === 0 ? 0 : Math.max(2, Math.round(day.requests / Math.max(...(usageData.daily || []).map(d => d.requests || 0)) * 100))) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            </div>
+                        </template>
+
+                        <!-- Empty / error state -->
+                        <template x-if="!usageLoading && !usageData">
+                            <div class="flex flex-col items-center justify-center gap-4 py-20 text-center">
+                                <i class="fa-solid fa-gauge-high text-4xl text-slate-200 dark:text-slate-800"></i>
+                                <p class="text-xs font-mono text-slate-400">Could not load usage data — run python manage.py migrate first</p>
+                            </div>
+                        </template>
+
+                    </div>
+                </div>
+            </template>
+
+            <!-- ── Insights view ──────────────────────────────────────────── -->
+            <template x-if="viewMode === 'insights'">
+                <div class="flex-1 overflow-y-auto custom-scrollbar pb-14 md:pb-0">
+                    <div class="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-10">
+                        <!-- Header -->
+                        <div class="flex items-center justify-between mb-8">
+                            <div>
+                                <h1 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight">Insights</h1>
+                                <p class="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">Top entities across the entire archive</p>
+                            </div>
+                            <button @click="insightsData = null; loadInsights()"
+                                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 dark:hover:bg-slate-800 transition-all border border-slate-200 dark:border-slate-800">
+                                <i class="fa-solid fa-rotate text-[9px]" :class="insightsLoading && 'animate-spin'"></i>
+                                Refresh
+                            </button>
+                        </div>
+
+                        <!-- Loading skeleton -->
+                        <template x-if="insightsLoading">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <template x-for="n in [1,2,3]" :key="n">
+                                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 space-y-3 animate-pulse">
+                                        <div class="h-4 w-1/3 bg-slate-200 dark:bg-slate-800 rounded"></div>
+                                        <template x-for="i in [1,2,3,4,5]" :key="i">
+                                            <div class="space-y-1">
+                                                <div class="h-3 w-2/3 bg-slate-100 dark:bg-slate-800/60 rounded"></div>
+                                                <div class="h-2 w-full bg-slate-100 dark:bg-slate-800/40 rounded-full"></div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Charts -->
+                        <template x-if="!insightsLoading && insightsData">
+                            <div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                                <!-- People -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <div class="flex items-center gap-2 mb-5">
+                                        <span class="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                                            <i class="fa-solid fa-user text-blue-500 text-xs"></i>
+                                        </span>
+                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">People</h2>
+                                        <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.people || []).length + ' entities'"></span>
+                                    </div>
+                                    <template x-if="(insightsData.people || []).length === 0">
+                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
+                                    </template>
+                                    <div class="space-y-2.5">
+                                        <template x-for="(item, idx) in (insightsData.people || [])" :key="item.name">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-blue-500 rounded-full transition-all duration-700"
+                                                         :style="'width:' + Math.round(item.count / insightsData.people[0].count * 100) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- Locations -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <div class="flex items-center gap-2 mb-5">
+                                        <span class="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                                            <i class="fa-solid fa-location-dot text-emerald-500 text-xs"></i>
+                                        </span>
+                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Locations</h2>
+                                        <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.locations || []).length + ' entities'"></span>
+                                    </div>
+                                    <template x-if="(insightsData.locations || []).length === 0">
+                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
+                                    </template>
+                                    <div class="space-y-2.5">
+                                        <template x-for="(item, idx) in (insightsData.locations || [])" :key="item.name">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                                                         :style="'width:' + Math.round(item.count / insightsData.locations[0].count * 100) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- Organizations -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <div class="flex items-center gap-2 mb-5">
+                                        <span class="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                                            <i class="fa-solid fa-building text-amber-500 text-xs"></i>
+                                        </span>
+                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Organizations</h2>
+                                        <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.organizations || []).length + ' entities'"></span>
+                                    </div>
+                                    <template x-if="(insightsData.organizations || []).length === 0">
+                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
+                                    </template>
+                                    <div class="space-y-2.5">
+                                        <template x-for="(item, idx) in (insightsData.organizations || [])" :key="item.name">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-amber-500 rounded-full transition-all duration-700"
+                                                         :style="'width:' + Math.round(item.count / insightsData.organizations[0].count * 100) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            <!-- ── Archive health ──────────────────── -->
+                            <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Total records</span>
+                                    <span class="text-2xl font-black text-slate-800 dark:text-slate-100" x-text="(insightsData.health?.total || 0).toLocaleString()"></span>
+                                </div>
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Entity coverage</span>
+                                    <span class="text-2xl font-black text-emerald-500" x-text="(insightsData.health?.entities_pct || 0) + '%'"></span>
+                                    <span class="text-[9px] text-slate-400" x-text="(insightsData.health?.with_entities || 0).toLocaleString() + ' docs'"></span>
+                                </div>
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Vector coverage</span>
+                                    <span class="text-2xl font-black text-indigo-500" x-text="(insightsData.health?.embeddings_pct || 0) + '%'"></span>
+                                    <span class="text-[9px] text-slate-400" x-text="(insightsData.health?.with_embeddings || 0).toLocaleString() + ' docs'"></span>
+                                </div>
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Unique entities</span>
+                                    <span class="text-2xl font-black text-amber-500"
+                                          x-text="((insightsData.people?.length || 0) + (insightsData.locations?.length || 0) + (insightsData.organizations?.length || 0))"></span>
+                                    <span class="text-[9px] text-slate-400">top tracked</span>
+                                </div>
+                            </div>
+
+                            <!-- ── Volume over time + Category breakdown ──── -->
+                            <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                                <!-- Volume over time -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <div class="flex items-center gap-2 mb-5">
+                                        <span class="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                                            <i class="fa-solid fa-chart-line text-indigo-500 text-xs"></i>
+                                        </span>
+                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Volume over time</h2>
+                                    </div>
+                                    <template x-if="(insightsData.monthly_volume || []).length === 0">
+                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No date data</p>
+                                    </template>
+                                    <div class="space-y-2">
+                                        <template x-for="item in (insightsData.monthly_volume || [])" :key="item.month">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[10px] font-mono text-slate-500 dark:text-slate-400 w-20 shrink-0" x-text="item.month"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400 ml-2 shrink-0" x-text="item.count"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-indigo-500 rounded-full transition-all duration-700"
+                                                         :style="'width:' + Math.round(item.count / Math.max(...(insightsData.monthly_volume || [{}]).map(x => x.count || 0)) * 100) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- Category breakdown -->
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                    <div class="flex items-center gap-2 mb-5">
+                                        <span class="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                                            <i class="fa-solid fa-layer-group text-purple-500 text-xs"></i>
+                                        </span>
+                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Categories</h2>
+                                    </div>
+                                    <template x-if="(insightsData.categories || []).length === 0">
+                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No category data</p>
+                                    </template>
+                                    <div class="space-y-2.5">
+                                        <template x-for="item in (insightsData.categories || [])" :key="item.name">
+                                            <div>
+                                                <div class="flex justify-between items-baseline mb-1">
+                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2 capitalize" x-text="item.name.replace(/_/g,' ')"></span>
+                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                                </div>
+                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                    <div class="h-full bg-purple-500 rounded-full transition-all duration-700"
+                                                         :style="'width:' + Math.round(item.count / (insightsData.categories[0]?.count || 1) * 100) + '%'"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- ── Playlist distribution ──────────────────── -->
+                            <div class="mt-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                                <div class="flex items-center gap-2 mb-5">
+                                    <span class="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center">
+                                        <i class="fa-solid fa-list-ul text-teal-500 text-xs"></i>
+                                    </span>
+                                    <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Playlist distribution</h2>
+                                </div>
+                                <template x-if="(insightsData.playlists || []).length === 0">
+                                    <p class="text-[10px] text-slate-400 font-mono text-center py-4">No playlist data</p>
+                                </template>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
+                                    <template x-for="item in (insightsData.playlists || [])" :key="item.name">
+                                        <div>
+                                            <div class="flex justify-between items-baseline mb-1">
+                                                <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                                <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                            </div>
+                                            <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                                <div class="h-full bg-teal-500 rounded-full transition-all duration-700"
+                                                     :style="'width:' + Math.round(item.count / (insightsData.playlists[0]?.count || 1) * 100) + '%'"></div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
+                            </div><!-- /single-root wrapper -->
+                        </template>
+
+                        <!-- Empty state (no data, not loading) -->
+                        <template x-if="!insightsLoading && !insightsData">
+                            <div class="flex flex-col items-center justify-center gap-4 py-20 text-center">
+                                <i class="fa-solid fa-chart-bar text-4xl text-slate-200 dark:text-slate-800"></i>
+                                <p class="text-xs font-mono text-slate-400">Click Refresh to load entity data</p>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
             <template x-if="viewMode === 'entries' && !activeItem">
                 <div class="h-full flex flex-col items-center justify-center gap-5 pb-14 md:pb-0">
                     <div class="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800/60 flex items-center justify-center">
@@ -1171,6 +1853,18 @@
                 class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
             <i class="fa-solid fa-circle-nodes text-[15px]"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Nexus</span>
+        </button>
+        <button @click="viewMode = 'insights'; loadInsights()"
+                :class="viewMode === 'insights' ? 'text-indigo-400' : 'text-slate-600'"
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
+            <i class="fa-solid fa-chart-bar text-[15px]"></i>
+            <span class="text-[7px] font-black uppercase tracking-wider">Insights</span>
+        </button>
+        <button @click="viewMode = 'usage'; loadUsage()"
+                :class="viewMode === 'usage' ? 'text-indigo-400' : 'text-slate-600'"
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
+            <i class="fa-solid fa-gauge-high text-[15px]"></i>
+            <span class="text-[7px] font-black uppercase tracking-wider">Usage</span>
         </button>
         {% if user.is_superuser %}
         <button @click="viewMode = 'command'"

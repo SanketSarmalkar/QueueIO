@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,8 +20,8 @@
     <div class="w-full max-w-sm">
         <!-- Logo -->
         <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600 shadow-2xl shadow-indigo-500/30 mb-5">
-                <i class="fa-solid fa-shield-halved text-white text-2xl"></i>
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl shadow-indigo-500/20 mb-5">
+                <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-10 h-10 rounded-xl object-cover">
             </div>
             <h1 class="text-white text-2xl font-black uppercase tracking-tighter">Queue <span class="text-indigo-400">IO</span></h1>
             <p class="text-slate-600 text-[9px] mt-1.5 uppercase tracking-[0.3em] font-mono">Restricted Access</p>
