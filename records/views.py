@@ -257,7 +257,10 @@ def command_center_view(request):
 @login_required
 def get_nexus_graph(request):
     collection = get_db_collection()
-    reports = list(collection.find({"entities": {"$exists": True}}).sort('createdat', -1).limit(500))
+    reports = list(collection.find(
+        {"entities": {"$exists": True}},
+        {"a": 1, "entities": 1}
+    ).sort('createdat', -1).limit(500))
     
     nodes = []
     links = []

@@ -48,6 +48,9 @@
                 loadingMore: false,
                 hoverNode: null,
                 nexusLoading: false,
+                nexusMouseX: 0,
+                nexusMouseY: 0,
+                nexusStats: { nodes: 0, links: 0 },
     
                 init() {
                     try {
@@ -252,10 +255,9 @@
                 },
     
                 async renderNexus() {
-
                     if (NEXUS_ENGINE) {
                         console.log("⚡ Nexus Engine active. Resuming session.");
-                        return; 
+                        return;
                     }
 
                     this.nexusLoading = true;
@@ -263,52 +265,69 @@
                     this.$nextTick(async () => {
                         const elem = document.getElementById('nexus-canvas');
                         if (!elem) return;
-    
+
                         const response = await fetch('/nexus-data/');
                         const data = await response.json();
 
                         this.nexusData = data;
-    
+                        this.nexusStats = { nodes: data.nodes.length, links: data.links.length };
+
                         if (NEXUS_ENGINE) NEXUS_ENGINE._destructor();
-    
+
                         NEXUS_ENGINE = ForceGraph()(elem)
                             .graphData(data)
                             .nodeId('id')
                             .backgroundColor('#020617')
-                            
-                            .d3Force('charge', d3.forceManyBody().strength(-1500)) 
+
+                            .d3Force('charge', d3.forceManyBody().strength(-1500))
                             .d3Force('link', d3.forceLink().distance(150))
                             .d3Force('center', d3.forceCenter())
-                            
-                            .linkColor(() => '#1e293b') 
-                            .linkWidth(0.7)
-    
+
+                            .linkColor(() => '#1e3a5f')
+                            .linkWidth(1)
+
                             .nodeCanvasObject((node, ctx, globalScale) => {
+                                const isHovered = this.hoverNode && node.id === this.hoverNode.id;
                                 const searchTerm = this.searchQuery.toLowerCase().trim();
                                 const isMatch = searchTerm.length > 1 && node.name?.toLowerCase().includes(searchTerm);
-                                
-                                ctx.globalAlpha = (searchTerm.length > 1 && !isMatch) ? 0.05 : 1;
-    
+                                const highlight = isHovered || isMatch;
+
+                                ctx.globalAlpha = (searchTerm.length > 1 && !isMatch) ? 0.07 : 1;
+
+                                // Soft glow ring behind highlighted nodes
+                                if (highlight) {
+                                    ctx.beginPath();
+                                    ctx.arc(node.x, node.y, 20 / globalScale, 0, 2 * Math.PI);
+                                    ctx.fillStyle = (node.color || '#6366f1') + '28';
+                                    ctx.fill();
+                                }
+
+                                const radius = (isHovered ? 14 : 11) / globalScale;
                                 ctx.beginPath();
-                                ctx.arc(node.x, node.y, 12 / globalScale, 0, 2 * Math.PI);
+                                ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI);
                                 ctx.fillStyle = node.color || '#6366f1';
-                                ctx.shadowBlur = isMatch ? 30 : 10;
+                                ctx.shadowBlur = highlight ? 22 : 8;
                                 ctx.shadowColor = node.color || '#6366f1';
                                 ctx.fill();
-    
+                                ctx.shadowBlur = 0;
+
                                 ctx.beginPath();
-                                ctx.arc(node.x, node.y, 5 / globalScale, 0, 2 * Math.PI);
-                                ctx.fillStyle = "#fff";
+                                ctx.arc(node.x, node.y, 3.5 / globalScale, 0, 2 * Math.PI);
+                                ctx.fillStyle = '#ffffff';
                                 ctx.fill();
-    
-                                if (isMatch || globalScale > 3) {
-                                    ctx.shadowBlur = 0;
-                                    ctx.font = `${16/globalScale}px Inter, sans-serif`;
+
+                                if (highlight || globalScale > 2) {
+                                    ctx.font = `bold ${13 / globalScale}px Inter, sans-serif`;
                                     ctx.textAlign = 'center';
-                                    ctx.fillStyle = isMatch ? '#fff' : '#64748b';
-                                    ctx.fillText(node.name, node.x, node.y + 20/globalScale);
+                                    ctx.fillStyle = highlight ? '#ffffff' : '#94a3b8';
+                                    ctx.fillText(node.name, node.x, node.y + 20 / globalScale);
                                 }
+
                                 ctx.globalAlpha = 1;
+                            })
+                            .onNodeHover(node => {
+                                this.hoverNode = node || null;
+                                elem.style.cursor = node ? 'pointer' : 'default';
                             })
                             .onNodeClick(node => {
                                 NEXUS_ENGINE.centerAt(node.x, node.y, 800);
@@ -317,9 +336,8 @@
                                     setTimeout(() => { this.selectItem(node.id); }, 900);
                                 }
                             });
-                            setTimeout(() => {
-                                this.nexusLoading = false;
-                            }, 1200);
+
+                        setTimeout(() => { this.nexusLoading = false; }, 1200);
                     });
                 },
 
@@ -754,17 +772,19 @@
                 </div>
             </template>
 
-            <div 
-                x-show="viewMode === 'nexus'" 
+            <div
+                x-show="viewMode === 'nexus'"
                 class="h-full w-full bg-slate-950 relative overflow-hidden"
-                style="display: none;" 
+                style="display: none;"
                 :class="{ 'block': viewMode === 'nexus' }"
+                @mousemove="nexusMouseX = $event.clientX; nexusMouseY = $event.clientY"
             >
-            <div x-show="nexusLoading" 
-                x-transition:enter="transition ease-out duration-300"
-                x-transition:leave="transition ease-in duration-500"
-                class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl">
-                <div class="flex flex-col items-center gap-6">
+                <!-- Loading overlay -->
+                <div x-show="nexusLoading"
+                    x-transition:enter="transition ease-out duration-300"
+                    x-transition:leave="transition ease-in duration-500"
+                    class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl">
+                    <div class="flex flex-col items-center gap-6">
                         <div class="relative w-20 h-20">
                             <div class="absolute inset-0 border-4 border-indigo-500/10 rounded-full"></div>
                             <div class="absolute inset-0 border-4 border-t-indigo-500 rounded-full animate-spin"></div>
@@ -774,33 +794,94 @@
                             <p class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] animate-pulse">Initializing Nexus Engine</p>
                             <p class="text-[8px] font-mono text-slate-500 uppercase tracking-widest">Synthesizing Cross-Report Relationships...</p>
                         </div>
+                    </div>
                 </div>
-            </div>
-                    <div class="absolute top-6 right-6 z-20 w-64 md:w-80 group">
-                        <div class="relative">
-                            <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors"></i>
-                            <input 
-                                type="text" 
-                                x-model="searchQuery" 
-                                placeholder="Search Nexus (e.g. 'China' or 'Adani')..." 
-                                class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
-                            >
-                        </div>
-                        
-                        <p class="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-2 px-2 text-right">
-                            Auto-panning to Intelligence Nodes
-                        </p>
-                    </div>
-                    <div class="absolute top-6 left-6 z-10 bg-slate-900/50 backdrop-blur border border-slate-800 p-4 rounded-2xl pointer-events-none">
-                        <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Nexus Legend</h3>
-                        <div class="space-y-2">
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-indigo-500"></span> <span class="text-[9px] text-slate-400 uppercase">Reports</span></div>
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> <span class="text-[9px] text-slate-400 uppercase">Locations</span></div>
-                            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-500"></span> <span class="text-[9px] text-slate-400 uppercase">People</span></div>
+
+                <!-- Hover tooltip (fixed to escape overflow) -->
+                <template x-if="hoverNode && viewMode === 'nexus'">
+                    <div :style="`left: ${nexusMouseX + 14}px; top: ${nexusMouseY - 12}px`"
+                         class="fixed z-[200] pointer-events-none">
+                        <div class="bg-slate-900/95 border border-slate-700/80 rounded-xl px-3 py-2 shadow-2xl backdrop-blur-sm max-w-[220px]">
+                            <p class="font-bold text-white text-xs leading-snug truncate" x-text="hoverNode.name"></p>
+                            <p class="text-[9px] font-mono uppercase tracking-wider mt-0.5"
+                               :class="{
+                                   'text-indigo-400': hoverNode.type === 'report',
+                                   'text-emerald-400': hoverNode.type === 'locations',
+                                   'text-blue-400':    hoverNode.type === 'people',
+                                   'text-amber-400':   hoverNode.type === 'organizations'
+                               }"
+                               x-text="hoverNode.type"></p>
                         </div>
                     </div>
-                    
-                    <div id="nexus-canvas" class="h-full w-full"></div>
+                </template>
+
+                <!-- Search (top right) -->
+                <div class="absolute top-6 right-6 z-20 w-64 md:w-80 group">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors"></i>
+                        <input
+                            type="text"
+                            x-model="searchQuery"
+                            placeholder="Search nodes (e.g. 'China' or 'Adani')..."
+                            class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3.5 pl-11 pr-4 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
+                        >
+                    </div>
+                    <p class="text-[8px] font-black text-slate-600 uppercase tracking-widest mt-2 px-2 text-right">Auto-panning to intelligence nodes</p>
+                </div>
+
+                <!-- Legend + stats (top left) -->
+                <div class="absolute top-6 left-6 z-10 bg-slate-900/60 backdrop-blur-md border border-slate-800 p-4 rounded-2xl pointer-events-none">
+                    <h3 class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Legend</h3>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-indigo-400" style="box-shadow:0 0 6px #818cf8"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">Reports</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500" style="box-shadow:0 0 6px #10b981"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">Locations</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-blue-500" style="box-shadow:0 0 6px #3b82f6"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">People</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-amber-500" style="box-shadow:0 0 6px #f59e0b"></span>
+                            <span class="text-[9px] text-slate-400 uppercase">Organizations</span>
+                        </div>
+                    </div>
+                    <template x-if="nexusStats.nodes > 0">
+                        <div class="mt-4 pt-3 border-t border-slate-800 space-y-1.5">
+                            <div class="flex justify-between gap-6">
+                                <span class="text-[8px] text-slate-600 uppercase">Nodes</span>
+                                <span class="text-[8px] font-mono text-slate-400" x-text="nexusStats.nodes"></span>
+                            </div>
+                            <div class="flex justify-between gap-6">
+                                <span class="text-[8px] text-slate-600 uppercase">Links</span>
+                                <span class="text-[8px] font-mono text-slate-400" x-text="nexusStats.links"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Zoom controls (bottom right) -->
+                <div class="absolute bottom-6 right-6 z-20 flex flex-col gap-2">
+                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoom(NEXUS_ENGINE.zoom() * 1.5, 300)"
+                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all font-bold shadow-lg text-base leading-none">
+                        +
+                    </button>
+                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoom(NEXUS_ENGINE.zoom() / 1.5, 300)"
+                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all font-bold shadow-lg text-base leading-none">
+                        −
+                    </button>
+                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoomToFit(400)"
+                            title="Fit view"
+                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all shadow-lg">
+                        <i class="fa-solid fa-compress text-xs"></i>
+                    </button>
+                </div>
+
+                <div id="nexus-canvas" class="h-full w-full"></div>
             </div>
 
             <template x-if="!activeItem">
