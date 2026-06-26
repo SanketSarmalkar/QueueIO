@@ -9,6 +9,7 @@ from google import genai
 import os
 import json
 from bson import ObjectId
+from django.utils.timezone import now as tz_now
 
 import threading
 from tasks.models import TaskConfiguration, GlobalSetting, CronJob
@@ -38,11 +39,21 @@ def dashboard(request):
 
     # Stack counts — one aggregation, no full scan
     stack_pipeline = [
-        {"$group": {"_id": "$playlist_id", "count": {"$sum": 1}, "title": {"$first": "$playlist_title"}}},
+        {"$group": {
+            "_id": "$playlist_id",
+            "count": {"$sum": 1},
+            "title": {"$first": "$playlist_title"},
+            "thumbnail_key": {"$first": "$key"},
+        }},
         {"$sort": {"count": -1}},
     ]
     stacks_json = [
-        {"id": s["_id"] or "unassigned", "count": s["count"], "title": s.get("title") or "General Archive"}
+        {
+            "id": s["_id"] or "unassigned",
+            "count": s["count"],
+            "title": s.get("title") or "General Archive",
+            "thumbnail_key": s.get("thumbnail_key") or "",
+        }
         for s in collection.aggregate(stack_pipeline)
     ]
 
@@ -68,14 +79,107 @@ def dashboard(request):
 @login_required
 def get_more_records(request):
     offset = int(request.GET.get('offset', _PAGE_SIZE))
+    playlist_id = request.GET.get('playlist_id', '').strip()
     collection = get_db_collection()
-    total = collection.estimated_document_count()
-    records = list(collection.find({}, {'value': 0, 'embedding': 0}).sort('createdat', -1).skip(offset).limit(_PAGE_SIZE))
+
+    if playlist_id:
+        mongo_filter = {'playlist_id': playlist_id}
+        total = collection.count_documents(mongo_filter)
+        records = list(collection.find(mongo_filter, {'value': 0, 'embedding': 0}).sort('createdat', -1).skip(offset).limit(_PAGE_SIZE))
+    else:
+        mongo_filter = {}
+        total = collection.estimated_document_count()
+        records = list(collection.find(mongo_filter, {'value': 0, 'embedding': 0}).sort('createdat', -1).skip(offset).limit(_PAGE_SIZE))
+
     return JsonResponse({
         'items': [_format_record(r) for r in records],
         'has_more': offset + _PAGE_SIZE < total,
         'next_offset': offset + _PAGE_SIZE,
     })
+
+@login_required
+def list_bookmarks(request):
+    from records.models import Bookmark
+    ids = list(Bookmark.objects.filter(user=request.user).values_list('report_id', flat=True))
+    return JsonResponse({'ids': ids})
+
+
+@login_required
+def toggle_bookmark(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    from records.models import Bookmark
+    data = json.loads(request.body)
+    report_id = data.get('report_id', '').strip()
+    title = data.get('title', '')
+    if not report_id:
+        return JsonResponse({'error': 'report_id required'}, status=400)
+    existing = Bookmark.objects.filter(user=request.user, report_id=report_id).first()
+    if existing:
+        existing.delete()
+        return JsonResponse({'bookmarked': False})
+    Bookmark.objects.create(user=request.user, report_id=report_id, title=title)
+    return JsonResponse({'bookmarked': True})
+
+
+@login_required
+def get_related_reports(request, report_id):
+    try:
+        collection = get_db_collection()
+        doc = collection.find_one({"_id": ObjectId(report_id)}, {"embedding": 1})
+        if not doc or not doc.get("embedding"):
+            return JsonResponse({"items": []})
+
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "vector_index",
+                    "path": "embedding",
+                    "queryVector": doc["embedding"],
+                    "numCandidates": 50,
+                    "limit": 6,
+                }
+            },
+            {
+                "$project": {
+                    "a": 1, "category": 1, "key": 1,
+                    "createdat": 1, "playlist_id": 1, "playlist_title": 1,
+                }
+            },
+        ]
+        results = list(collection.aggregate(pipeline))
+        # exclude the source document itself
+        results = [r for r in results if str(r["_id"]) != report_id][:4]
+        return JsonResponse({"items": [_format_record(r) for r in results]})
+    except Exception:
+        return JsonResponse({"items": []})
+
+
+@login_required
+def search_records(request):
+    q = request.GET.get('q', '').strip()
+    if len(q) < 3:
+        return JsonResponse({'items': []})
+
+    collection = get_db_collection()
+    _ensure_text_index(collection)
+
+    try:
+        cursor = collection.find(
+            {"$text": {"$search": q}},
+            {"value": 0, "embedding": 0},
+        ).limit(50)
+        items = [_format_record(r) for r in cursor]
+    except Exception:
+        # Text index not ready yet — fall back to title-only regex
+        cursor = collection.find(
+            {"a": {"$regex": q, "$options": "i"}},
+            {"value": 0, "embedding": 0},
+        ).limit(50)
+        items = [_format_record(r) for r in cursor]
+
+    return JsonResponse({'items': items, 'query': q})
+
 
 def logout_view(request):
     logout(request)
@@ -133,10 +237,184 @@ def get_report_content(request, report_id):
     })
 
 _PAGE_SIZE = 50
+_TEXT_INDEX_ENSURED = False
+_ENTITY_STATS_CACHE = None
+_ENTITY_STATS_TS = None
+
+# Free-tier daily request limits per model family
+_FREE_TIER_RPD = 1500
+_FREE_TIER_TPD = 1_000_000
+
+def _log_api_usage(model, request_type, usage_metadata, source='intel_chat'):
+    try:
+        from records.models import ApiUsageLog
+        ApiUsageLog.objects.create(
+            date=tz_now().date(),
+            model=model,
+            request_type=request_type,
+            prompt_tokens=getattr(usage_metadata, 'prompt_token_count', 0) or 0,
+            output_tokens=getattr(usage_metadata, 'candidates_token_count', 0) or 0,
+            total_tokens=getattr(usage_metadata, 'total_token_count', 0) or 0,
+            source=source,
+        )
+    except Exception:
+        pass
 
 def get_db_collection():
     from tasks.config import MONGO_DB
     return MONGO_DB["mass_records"]
+
+def _ensure_text_index(collection):
+    global _TEXT_INDEX_ENSURED
+    if _TEXT_INDEX_ENSURED:
+        return
+    try:
+        collection.create_index(
+            [("a", "text"), ("value", "text")],
+            weights={"a": 10, "value": 1},
+            background=True,
+            name="full_text_search",
+        )
+    except Exception:
+        pass
+    _TEXT_INDEX_ENSURED = True
+
+@login_required
+def get_entity_stats(request):
+    global _ENTITY_STATS_CACHE, _ENTITY_STATS_TS
+    import time
+    now = time.time()
+    if _ENTITY_STATS_CACHE is not None and (now - _ENTITY_STATS_TS) < 600:
+        return JsonResponse(_ENTITY_STATS_CACHE)
+
+    collection = get_db_collection()
+
+    # ── Entity counts ──────────────────────────────────────────────────────────
+    counts = {"people": {}, "locations": {}, "organizations": {}}
+    for doc in collection.find({"entities": {"$exists": True}}, {"entities": 1}):
+        raw = doc.get("entities", {})
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw.strip())
+            except Exception:
+                continue
+        for cat in counts:
+            for name in raw.get(cat, []):
+                name = name.strip()
+                if name:
+                    counts[cat][name] = counts[cat].get(name, 0) + 1
+
+    result = {}
+    for cat, freq in counts.items():
+        top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:15]
+        result[cat] = [{"name": n, "count": c} for n, c in top]
+
+    # ── Volume over time (last 12 months) ──────────────────────────────────────
+    monthly_pipeline = [
+        {"$match": {"createdat": {"$exists": True, "$type": "date"}}},
+        {"$group": {
+            "_id": {"year": {"$year": "$createdat"}, "month": {"$month": "$createdat"}},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}},
+        {"$limit": 12},
+    ]
+    _MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    result["monthly_volume"] = [
+        {"month": f"{_MONTH_NAMES[r['_id']['month']-1]} {r['_id']['year']}", "count": r["count"]}
+        for r in collection.aggregate(monthly_pipeline)
+    ]
+
+    # ── Category breakdown ─────────────────────────────────────────────────────
+    cat_pipeline = [
+        {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    result["categories"] = [
+        {"name": r["_id"] or "unknown", "count": r["count"]}
+        for r in collection.aggregate(cat_pipeline)
+    ]
+
+    # ── Playlist distribution ──────────────────────────────────────────────────
+    playlist_pipeline = [
+        {"$group": {
+            "_id": "$playlist_title",
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": 10},
+    ]
+    result["playlists"] = [
+        {"name": r["_id"] or "General Archive", "count": r["count"]}
+        for r in collection.aggregate(playlist_pipeline)
+    ]
+
+    # ── Archive health ─────────────────────────────────────────────────────────
+    total = collection.estimated_document_count()
+    with_entities = collection.count_documents({"entities": {"$exists": True}})
+    with_embeddings = collection.count_documents({"embedding": {"$exists": True}})
+    result["health"] = {
+        "total": total,
+        "with_entities": with_entities,
+        "with_embeddings": with_embeddings,
+        "entities_pct": round(with_entities / total * 100) if total else 0,
+        "embeddings_pct": round(with_embeddings / total * 100) if total else 0,
+    }
+
+    _ENTITY_STATS_CACHE = result
+    _ENTITY_STATS_TS = now
+    return JsonResponse(result)
+
+@login_required
+def get_usage_stats(request):
+    from records.models import ApiUsageLog
+    from django.db.models import Sum, Count
+    from datetime import timedelta
+
+    today = tz_now().date()
+
+    # ── Today's totals by request type ────────────────────────────────────────
+    today_qs = ApiUsageLog.objects.filter(date=today)
+    gen_today = today_qs.filter(request_type='generate').aggregate(
+        requests=Count('id'), tokens=Sum('total_tokens'), prompt=Sum('prompt_tokens'), output=Sum('output_tokens')
+    )
+    embed_today = today_qs.filter(request_type='embed').aggregate(
+        requests=Count('id'), tokens=Sum('total_tokens')
+    )
+    source_breakdown = {}
+    for row in today_qs.values('source').annotate(requests=Count('id'), tokens=Sum('total_tokens')):
+        source_breakdown[row['source']] = {'requests': row['requests'], 'tokens': row['tokens'] or 0}
+
+    # ── Last 7 days ────────────────────────────────────────────────────────────
+    daily = []
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        agg = ApiUsageLog.objects.filter(date=d).aggregate(requests=Count('id'), tokens=Sum('total_tokens'))
+        daily.append({
+            'date': d.strftime('%b %d'),
+            'requests': agg['requests'] or 0,
+            'tokens': agg['tokens'] or 0,
+        })
+
+    total_today = (gen_today['requests'] or 0) + (embed_today['requests'] or 0)
+    total_tokens_today = (gen_today['tokens'] or 0) + (embed_today['tokens'] or 0)
+
+    return JsonResponse({
+        'today': {
+            'total_requests': total_today,
+            'total_tokens': total_tokens_today,
+            'generate_requests': gen_today['requests'] or 0,
+            'generate_tokens': gen_today['tokens'] or 0,
+            'embed_requests': embed_today['requests'] or 0,
+            'embed_tokens': embed_today['tokens'] or 0,
+        },
+        'source_breakdown': source_breakdown,
+        'daily': daily,
+        'limits': {
+            'rpd': _FREE_TIER_RPD,
+            'tpd': _FREE_TIER_TPD,
+        },
+    })
 
 def _format_record(item):
     created_at = item.get('createdat')
@@ -164,7 +442,11 @@ def intel_chat_view(request):
     if request.method == "POST":
         try:
             data = json.loads(request.body)
-            user_query = data.get('query')
+            user_query = data.get('query', '').strip()
+            history = data.get('history', [])  # [{role: "user"/"ai", text: "..."}]
+
+            from tasks.config import get_global_setting
+            ai_model = get_global_setting('AI_MODEL', os.getenv('AI_MODEL', 'gemini-2.0-flash'))
 
             client = genai.Client(api_key=os.getenv("GEN_AI_API_KEY"))
             collection = get_db_collection()
@@ -174,6 +456,7 @@ def intel_chat_view(request):
                 contents=[user_query]
             )
             query_vector = query_res.embeddings[0].values
+            _log_api_usage("gemini-embedding-001", "embed", query_res.usage_metadata)
 
             pipeline = [
                 {
@@ -182,14 +465,15 @@ def intel_chat_view(request):
                         "path": "embedding",
                         "queryVector": query_vector,
                         "numCandidates": 100,
-                        "limit": 5
+                        "limit": 6
                     }
                 },
                 {
                     "$project": {
-                        "a": 1, 
-                        "value": 1, 
+                        "a": 1,
+                        "value": 1,
                         "playlist_title": 1,
+                        "createdat": 1,
                         "score": {"$meta": "vectorSearchScore"}
                     }
                 }
@@ -197,29 +481,44 @@ def intel_chat_view(request):
             context_reports = list(collection.aggregate(pipeline))
 
             context_text = "\n\n".join([
-                f"REPORT: {r['a']}\nSUMMARY: {r['value']}"
-                for r in context_reports
+                f"[SOURCE {i+1}] {str(r.get('a',''))} ({r.get('playlist_title','')})\n{r.get('value','')}"
+                for i, r in enumerate(context_reports)
             ])
 
-            prompt = f"""
-            You are a Senior Intelligence Analyst. Provide a concise, professional synthesis 
-            to the following query based ONLY on the archive data provided below.
-            
-            QUERY: {user_query}
-            
-            ARCHIVE DATA:
-            {context_text}
-            """
-            
-            llm_res = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview", 
-                contents=prompt
-            )
+            history_text = ""
+            if history:
+                turns = []
+                for turn in history[-6:]:  # last 3 exchanges
+                    role = "Analyst" if turn.get("role") == "ai" else "Operator"
+                    turns.append(f"{role}: {turn.get('text', '')}")
+                history_text = "CONVERSATION HISTORY:\n" + "\n\n".join(turns) + "\n\n"
 
-            return JsonResponse({
-                "answer": llm_res.text,
-                "sources": [{"title": str(r['a']).split('|')[0].strip()} for r in context_reports]
-            })
+            prompt = f"""You are a Senior Intelligence Analyst with access to a curated archive of reports. \
+Answer questions based ONLY on the archive data provided. Be concise and professional. \
+If the archive data is insufficient, say so clearly rather than speculating.
+
+{history_text}CURRENT QUERY: {user_query}
+
+ARCHIVE DATA:
+{context_text}"""
+
+            llm_res = client.models.generate_content(model=ai_model, contents=prompt)
+            _log_api_usage(ai_model, "generate", llm_res.usage_metadata)
+
+            sources = []
+            for r in context_reports:
+                created = r.get('createdat')
+                date_str = ""
+                if created and hasattr(created, 'strftime'):
+                    date_str = created.strftime("%b %d, %Y")
+                sources.append({
+                    "id": str(r['_id']),
+                    "title": str(r.get('a', 'Untitled')).split('|')[0].strip(),
+                    "playlist_title": r.get('playlist_title', ''),
+                    "date": date_str,
+                })
+
+            return JsonResponse({"answer": llm_res.text, "sources": sources})
         except Exception as e:
             return JsonResponse({"answer": f"SYSTEM ERROR: {str(e)}"}, status=500)
     return redirect('dashboard')

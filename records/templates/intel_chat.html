@@ -1,76 +1,89 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cross-Intel Chat | Queue IO</title>
-    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <title>Intel Chat — Queuei</title>
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/typography@0.5.10/dist/typography.min.css">
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
 </head>
-<body class="bg-[#0B0F19] text-white font-sans">
+<body class="bg-slate-950 text-slate-200 h-screen flex flex-col font-sans overflow-hidden"
+      x-data="chatApp" x-init="init()">
 
-<div x-data="{ 
-    query: '', 
-    loading: false, 
-    messages: [], 
-    async sendQuery() {
-        if (!this.query.trim() || this.loading) return;
-        this.loading = true;
-        
-        const userMsg = this.query;
-        this.messages.push({ role: 'user', text: userMsg });
-        this.query = '';
-
-        try {
-            const response = await fetch('{% url 'intel_chat' %}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}'
-                },
-                body: JSON.stringify({ query: userMsg })
-            });
-            const data = await response.json();
-            this.messages.push({ 
-                role: 'ai', 
-                text: marked.parse(data.answer), 
-                sources: data.sources 
-            });
-        } catch (e) {
-            this.messages.push({ role: 'ai', text: 'ERROR: Uplink interrupted.' });
-        } finally {
-            this.loading = false;
-            this.$nextTick(() => { this.$refs.scrollArea.scrollTop = this.$refs.scrollArea.scrollHeight });
-        }
-    }
-}" class="flex flex-col h-screen">
-
-    <div class="p-6 border-b border-gray-800 flex justify-between items-center">
-        <div>
-            <h1 class="text-2xl font-bold tracking-tight uppercase">Cross-Intel Chat</h1>
-            <p class="text-gray-400 text-xs mt-1">Direct query access to the 3072-dim Intelligence Archive.</p>
+    <!-- Header -->
+    <header class="h-14 bg-slate-900 flex items-center px-4 md:px-6 justify-between shadow-lg border-b border-slate-800 shrink-0">
+        <div class="flex items-center gap-2 md:gap-3">
+            <a href="/" class="flex items-center gap-2 md:gap-3">
+                <img src="{% static 'favicon.png' %}" alt="Logo" class="w-9 h-9 rounded-lg object-cover border border-slate-700/50">
+                <span class="font-black tracking-tighter text-lg uppercase text-white hidden sm:block">Queue <span class="text-indigo-400">IO</span></span>
+            </a>
+            <span class="text-slate-700 text-xs hidden sm:block">/</span>
+            <span class="text-[10px] font-black uppercase tracking-widest text-indigo-400">Intel Chat</span>
         </div>
-        <a href="/" class="text-xs text-indigo-400 hover:text-white transition">← BACK TO STACKS</a>
-    </div>
+        <div class="flex items-center gap-3 md:gap-4">
+            <button @click="messages = []"
+                    class="flex items-center gap-1.5 text-slate-600 hover:text-red-400 transition-colors text-[9px] font-bold uppercase tracking-widest">
+                <i class="fa-solid fa-trash-can text-[9px]"></i><span class="hidden sm:inline"> Clear</span>
+            </button>
+            <a href="/" class="flex items-center gap-1.5 text-slate-400 hover:text-white transition-colors text-[10px] font-mono uppercase border-l border-slate-800 pl-3 md:pl-4">
+                <i class="fa-solid fa-arrow-left text-[9px]"></i><span class="hidden sm:inline"> Dashboard</span>
+            </a>
+        </div>
+    </header>
 
-    <div x-ref="scrollArea" class="flex-1 overflow-y-auto p-6 space-y-6">
+    <!-- Messages -->
+    <div id="chat-scroll" class="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-6 py-6 md:py-8 space-y-8 md:space-y-10">
+
+        <!-- Empty state -->
+        <template x-if="messages.length === 0">
+            <div class="h-full flex flex-col items-center justify-center gap-4 py-24">
+                <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+                    <i class="fa-solid fa-bolt-lightning text-indigo-400 text-xl"></i>
+                </div>
+                <div class="text-center space-y-1">
+                    <p class="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Intelligence Archive Ready</p>
+                    <p class="text-[10px] font-mono text-slate-700">Ask about any entity, report, or topic in the archive</p>
+                </div>
+            </div>
+        </template>
+
         <template x-for="(msg, index) in messages" :key="index">
-            <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
-                <div :class="msg.role === 'user' 
-                    ? 'bg-indigo-600 text-white rounded-t-xl rounded-bl-xl' 
-                    : 'bg-[#161B29] border border-gray-800 text-gray-200 rounded-t-xl rounded-br-xl'"
-                    class="max-w-[80%] p-4 shadow-xl">
-                    
-                    <div class="text-sm leading-relaxed markdown-content" x-html="msg.text"></div>
+            <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'" class="max-w-4xl mx-auto w-full">
+                <span class="text-[8px] font-black text-slate-600 uppercase tracking-[0.3em] mb-2 px-2"
+                      x-text="msg.role === 'user' ? 'You' : 'System Intelligence'"></span>
+
+                <div :class="msg.role === 'user'
+                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-xl shadow-indigo-500/10 px-5 py-3'
+                    : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-2xl rounded-tl-none shadow-xl p-6 relative'"
+                     class="max-w-[85%]">
+
+                    <template x-if="msg.role === 'ai'">
+                        <div class="absolute top-0 left-0 w-[3px] h-full bg-indigo-500 rounded-tl-2xl"></div>
+                    </template>
+
+                    <div class="prose prose-sm prose-invert leading-relaxed" x-html="msg.text"></div>
 
                     <template x-if="msg.sources && msg.sources.length > 0">
-                        <div class="mt-4 pt-3 border-t border-gray-700">
-                            <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Sources</p>
+                        <div class="mt-6 pt-4 border-t border-slate-800">
+                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-3 flex items-center gap-2">
+                                <i class="fa-solid fa-link text-indigo-500"></i> Sources
+                            </p>
                             <div class="flex flex-wrap gap-2">
                                 <template x-for="src in msg.sources">
-                                    <span class="bg-black/40 px-2 py-1 rounded text-[10px] text-indigo-400 border border-indigo-500/30"
-                                          x-text="src.title"></span>
+                                    <a href="/"
+                                       class="bg-indigo-500/8 hover:bg-indigo-500/20 border border-indigo-500/20 px-2.5 py-1.5 rounded-lg text-[9px] font-bold text-indigo-400 transition-all flex items-center gap-1.5">
+                                        <span x-text="src.title"></span>
+                                        <i class="fa-solid fa-arrow-up-right-from-square text-[8px] opacity-60"></i>
+                                    </a>
                                 </template>
                             </div>
                         </div>
@@ -79,27 +92,79 @@
             </div>
         </template>
 
-        <div x-show="loading" class="flex items-center space-x-2 text-indigo-400">
-            <div class="animate-bounce">●</div>
-            <div class="animate-bounce [animation-delay:0.2s]">●</div>
-            <div class="animate-bounce [animation-delay:0.4s]">●</div>
+        <!-- Loading -->
+        <div x-show="loading" class="max-w-4xl mx-auto w-full">
+            <div class="flex items-center gap-3 text-indigo-400 font-mono text-[9px] tracking-[0.3em] animate-pulse">
+                <i class="fa-solid fa-microchip animate-spin"></i>
+                CROSS-REFERENCING ARCHIVE...
+            </div>
         </div>
     </div>
 
-    <div class="p-6 border-t border-gray-800">
-        <div class="relative max-w-4xl mx-auto">
-            <input 
-                type="text" 
-                x-model="query" 
-                @keyup.enter.prevent="sendQuery()"
-                placeholder="Ask about geopolitics, trade, or security..."
-                class="w-full bg-[#161B29] border border-gray-700 rounded-xl py-4 pl-6 pr-16 text-white focus:outline-none focus:border-indigo-500 transition-all shadow-2xl"
-            >
-            <button @click="sendQuery()" class="absolute right-3 top-1/2 -translate-y-1/2 text-indigo-500 hover:text-white">
-                SEND
+    <!-- Input bar -->
+    <div class="shrink-0 border-t border-slate-800 bg-slate-900 p-3 md:p-5">
+        <div class="max-w-4xl mx-auto relative">
+            <input type="text"
+                   x-model="query"
+                   @keyup.enter.prevent="sendQuery()"
+                   placeholder="Ask about entities, geopolitics, events..."
+                   class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 rounded-2xl py-3 md:py-4 pl-4 md:pl-5 pr-14 md:pr-16 text-sm text-white outline-none transition-all placeholder:text-slate-600">
+            <button @click="sendQuery()"
+                    :disabled="loading || !query.trim()"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center">
+                <i class="fa-solid fa-bolt-lightning text-xs"></i>
             </button>
         </div>
+        <p class="text-center text-[9px] font-mono text-slate-700 mt-2 uppercase tracking-widest">
+            Vector search across {{ "3072" }}-dim embeddings
+        </p>
     </div>
-</div>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('chatApp', () => ({
+                query: '',
+                loading: false,
+                messages: [],
+
+                init() {},
+
+                async sendQuery() {
+                    if (!this.query.trim() || this.loading) return;
+                    this.loading = true;
+                    const userMsg = this.query;
+                    this.messages.push({ role: 'user', text: userMsg });
+                    this.query = '';
+
+                    this.$nextTick(() => {
+                        const el = document.getElementById('chat-scroll');
+                        if (el) el.scrollTop = el.scrollHeight;
+                    });
+
+                    try {
+                        const resp = await fetch('{% url "intel_chat" %}', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                            body: JSON.stringify({ query: userMsg }),
+                        });
+                        const data = await resp.json();
+                        this.messages.push({
+                            role: 'ai',
+                            text: typeof marked !== 'undefined' ? marked.parse(data.answer) : data.answer,
+                            sources: data.sources || [],
+                        });
+                    } catch(e) {
+                        this.messages.push({ role: 'ai', text: 'System error: Intelligence uplink failed.' });
+                    } finally {
+                        this.loading = false;
+                        this.$nextTick(() => {
+                            const el = document.getElementById('chat-scroll');
+                            if (el) el.scrollTop = el.scrollHeight;
+                        });
+                    }
+                },
+            }));
+        });
+    </script>
 </body>
 </html>

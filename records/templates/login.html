@@ -1,70 +1,85 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Queue IO</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <title>Login | Queue IO</title>
+    <style>
+        .dot-grid {
+            background-image: radial-gradient(#1e293b 1px, transparent 1px);
+            background-size: 28px 28px;
+        }
+    </style>
 </head>
-<body class="bg-slate-950 h-screen flex items-center justify-center font-sans">
-    
-    <div class="w-full max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl">
+<body class="bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-4">
+
+    <div class="w-full max-w-sm">
+        <!-- Logo -->
         <div class="text-center mb-8">
-            <div class="bg-indigo-600 w-12 h-12 rounded-lg flex items-center justify-center mx-auto mb-4">
-                <i class="fa-solid fa-shield-halved text-white text-xl"></i>
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl shadow-indigo-500/20 mb-5">
+                <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-10 h-10 rounded-xl object-cover">
             </div>
-            <h1 class="text-white text-2xl font-black uppercase tracking-tighter">Queue <span class="text-indigo-400">Auth</span></h1>
-            <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-widest font-mono">Restricted Access Terminal</p>
+            <h1 class="text-white text-2xl font-black uppercase tracking-tighter">Queue <span class="text-indigo-400">IO</span></h1>
+            <p class="text-slate-600 text-[9px] mt-1.5 uppercase tracking-[0.3em] font-mono">Restricted Access</p>
         </div>
 
-        <form method="post" class="space-y-6" x-data="{ showPassword: false }">
-            {% csrf_token %}
-            
-            <div>
-                <label class="text-slate-400 text-[10px] font-bold uppercase mb-2 block">Ident-String</label>
-                <div class="relative">
-                    <i class="fa-solid fa-user absolute left-4 top-4 text-slate-500 text-sm"></i>
-                    <input type="text" name="username" required 
-                           class="w-full bg-slate-800 border border-slate-700 rounded-lg pl-11 pr-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
+        <!-- Card -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-2xl">
+            <form method="post" class="space-y-5" x-data="{ showPw: false }">
+                {% csrf_token %}
+
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">Username</label>
+                    <div class="relative">
+                        <i class="fa-solid fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
+                        <input type="text" name="username" required autofocus
+                               class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600"
+                               placeholder="Enter username">
+                    </div>
                 </div>
+
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">Password</label>
+                    <div class="relative">
+                        <i class="fa-solid fa-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
+                        <input :type="showPw ? 'text' : 'password'" name="password" required
+                               class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg pl-10 pr-10 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600"
+                               placeholder="Enter password">
+                        <button type="button" @click="showPw = !showPw"
+                                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-indigo-400 transition-colors">
+                            <i class="fa-solid text-xs" :class="showPw ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                    </div>
+                </div>
+
+                {% if form.errors %}
+                <div class="flex items-center gap-2 bg-red-500/8 border border-red-500/20 rounded-lg px-3 py-2">
+                    <i class="fa-solid fa-triangle-exclamation text-red-500 text-xs"></i>
+                    <p class="text-red-400 text-[10px] font-bold uppercase tracking-wide">Invalid credentials</p>
+                </div>
+                {% endif %}
+
+                <button type="submit"
+                        class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-black py-2.5 rounded-lg transition-all uppercase tracking-widest text-[11px] shadow-lg shadow-indigo-500/20 mt-2">
+                    Authenticate
+                </button>
+            </form>
+
+            <div class="mt-5 flex items-center gap-4">
+                <div class="h-px bg-slate-800 flex-1"></div>
+                <span class="text-slate-700 text-[9px] uppercase font-mono tracking-widest">or</span>
+                <div class="h-px bg-slate-800 flex-1"></div>
             </div>
 
-            <div>
-                <label class="text-slate-400 text-[10px] font-bold uppercase mb-2 block">Access-Key</label>
-                <div class="relative">
-                    <i class="fa-solid fa-lock absolute left-4 top-4 text-slate-500 text-sm"></i>
-                    
-                    <input :type="showPassword ? 'text' : 'password'" name="password" required 
-                           class="w-full bg-slate-800 border border-slate-700 rounded-lg pl-11 pr-12 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
-                    
-                    <button type="button" @click="showPassword = !showPassword" 
-                            class="absolute right-4 top-3.5 text-slate-500 hover:text-indigo-400 transition-colors">
-                        <i class="fa-solid" :class="showPassword ? 'fa-eye-slash' : 'fa-eye'"></i>
-                    </button>
-                </div>
-            </div>
-
-            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg transition-all uppercase tracking-widest text-sm shadow-lg shadow-indigo-500/20">
-                Initialize Session
-            </button>
-
-            <div class="mt-6 flex flex-col items-center gap-4">
-                <div class="flex items-center w-full gap-4">
-                    <div class="h-[1px] bg-slate-800 flex-1"></div>
-                    <span class="text-slate-600 text-[9px] uppercase font-mono tracking-widest">OR</span>
-                    <div class="h-[1px] bg-slate-800 flex-1"></div>
-                </div>
-                
-                <a href="{% url 'signup' %}" class="w-full text-center border border-slate-700 hover:border-indigo-500 text-slate-400 hover:text-indigo-400 font-bold py-3 rounded-lg transition-all uppercase tracking-widest text-sm">
-                    Register New Ident
-                </a>
-            </div>
-
-            {% if form.errors %}
-                <p class="text-red-400 text-center text-xs font-mono uppercase mt-4">Invalid Credentials</p>
-            {% endif %}
-        </form>
+            <a href="{% url 'signup' %}"
+               class="mt-4 flex items-center justify-center gap-2 w-full border border-slate-800 hover:border-slate-600 text-slate-500 hover:text-white text-[10px] font-bold uppercase tracking-widest py-2.5 rounded-lg transition-all">
+                <i class="fa-solid fa-user-plus text-[9px]"></i> Register New Account
+            </a>
+        </div>
     </div>
 
 </body>
