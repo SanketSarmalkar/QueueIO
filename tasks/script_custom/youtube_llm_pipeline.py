@@ -110,8 +110,36 @@ class YouTubeLLMPipeline:
             logging.error(f"Supadata failed for {video_id}: {e}")
             return None
 
+    def _fetch_from_gemini(self, video_id):
+        """Method 4: Gemini reads the YouTube URL server-side.
+
+        Google fetches the video on its own infrastructure, so this is not subject
+        to the datacenter-IP blocking that breaks youtube_transcript_api / yt-dlp on
+        cloud hosts (Render, etc.). Public videos only.
+        """
+        try:
+            from google.genai import types
+            logging.info(f"Attempting Gemini transcript for video {video_id}...")
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            response = self.genai_client.models.generate_content(
+                model=self.model,
+                contents=types.Content(parts=[
+                    types.Part(file_data=types.FileData(file_uri=url)),
+                    types.Part(text=(
+                        "Transcribe the spoken content of this video verbatim as plain text. "
+                        "Preserve the original spoken language. Output ONLY the transcript — "
+                        "no timestamps, speaker labels, or commentary."
+                    )),
+                ]),
+            )
+            text = (response.text or "").strip()
+            return text if text else None
+        except Exception as e:
+            logging.error(f"Gemini transcript failed for {video_id}: {e}")
+            return None
+
     def get_transcript(self, video):
-        """Orchestrator: cache-first, then Library → RapidAPI → Supadata."""
+        """Orchestrator: cache-first, then Library → Gemini → RapidAPI → Supadata."""
         if not video or 'id' not in video:
             return None
 
@@ -132,6 +160,10 @@ class YouTubeLLMPipeline:
             logging.warning(f"Transcript cache lookup failed for {video_id}: {e}")
 
         transcript = self._fetch_from_library(video_id)
+        if not transcript:
+            # Gemini fetches server-side — the reliable path on cloud hosts where
+            # the library/yt-dlp are blocked by YouTube's datacenter-IP filtering.
+            transcript = self._fetch_from_gemini(video_id)
         if not transcript:
             transcript = self._fetch_from_api(video_id)
         if not transcript:
