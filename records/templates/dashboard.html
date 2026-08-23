@@ -72,6 +72,9 @@
                 stocksSort: 'overall',
                 stocksSearch: '',
                 stockDetail: null,
+                feeds: [],
+                activeFeedKey: null,
+                activeRunIndex: 0,
                 hoverNode: null,
                 nexusLoading: false,
                 nexusMouseX: 0,
@@ -99,6 +102,10 @@
                         // object means no snapshot has been generated yet.
                         const stocksParsed = stocksEl ? JSON.parse(stocksEl.textContent) : null;
                         this.stocksData = (stocksParsed && Object.keys(stocksParsed).length) ? stocksParsed : null;
+                        // Generic dashboard feeds — each becomes a dynamic tab.
+                        const feedsEl = document.getElementById('feeds-data');
+                        this.feeds = feedsEl ? JSON.parse(feedsEl.textContent) : [];
+                        this.activeFeedKey = null; // Feeds opens to the card grid
                         this.totalCount = {{ total_count }};
                         this.hasMore = {{ has_more }};
                         this.nextOffset = {{ next_offset }};
@@ -655,6 +662,33 @@
         .prose strong { color: #4f46e5; }
         .dark .prose strong { color: #818cf8; }
 
+        /* Dark-mode prose palette. The standalone typography CSS ships no dark:
+           variant, so we drive the --tw-prose-* variables from the app's .dark
+           class (which every prose element reads via var()). */
+        .dark .prose {
+            --tw-prose-body: #cbd5e1;
+            --tw-prose-headings: #f8fafc;
+            --tw-prose-lead: #cbd5e1;
+            --tw-prose-links: #818cf8;
+            --tw-prose-bold: #818cf8;
+            --tw-prose-counters: #94a3b8;
+            --tw-prose-bullets: #475569;
+            --tw-prose-hr: #1e293b;
+            --tw-prose-quotes: #e2e8f0;
+            --tw-prose-quote-borders: #334155;
+            --tw-prose-captions: #94a3b8;
+            --tw-prose-code: #e2e8f0;
+            --tw-prose-pre-code: #e2e8f0;
+            --tw-prose-pre-bg: #0f172a;
+            --tw-prose-th-borders: #334155;
+            --tw-prose-td-borders: #1e293b;
+            color: #cbd5e1;
+        }
+        .dark .prose h1, .dark .prose h2, .dark .prose h4,
+        .dark .prose h5, .dark .prose h6 { color: #f8fafc; }
+        .dark .prose p, .dark .prose li, .dark .prose blockquote,
+        .dark .prose td, .dark .prose th { color: #cbd5e1; }
+
         [x-cloak] { display: none !important; }
         .alpine-ready { animation: fadeIn 0.4s ease-out; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -670,6 +704,7 @@
     {{ tasks_json|json_script:"tasks-data" }}
     {{ stacks_json|json_script:"stacks-data" }}
     {{ stocks_json|json_script:"stocks-data" }}
+    {{ feeds_json|json_script:"feeds-data" }}
 
     <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between z-50 border-b border-slate-800 shrink-0">
         <!-- Left: logo + sidebar toggle -->
@@ -735,6 +770,12 @@
                     :aria-current="viewMode === 'stocks_tab' ? 'page' : 'false'">
                 <i class="fa-solid fa-chart-line text-[9px]" aria-hidden="true"></i> Stocks
             </button>
+            <button x-show="feeds.length" @click="viewMode = 'feeds'; activeFeedKey = null"
+                    :class="viewMode === 'feeds' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'feeds' ? 'page' : 'false'">
+                <i class="fa-solid fa-rss text-[9px]" aria-hidden="true"></i> Feeds
+            </button>
             {% if user.is_superuser %}
             <button @click="viewMode = 'command'"
                     :class="viewMode === 'command' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
@@ -799,6 +840,7 @@
             {% include "partials/dash_view_usage.html" %}
             {% include "partials/dash_view_insights.html" %}
             {% include "partials/dash_view_stocks_tab.html" %}
+            {% include "partials/dash_view_feeds.html" %}
         </main>
     </div>
 
@@ -845,6 +887,13 @@
                 :aria-current="viewMode === 'stocks_tab' ? 'page' : 'false'">
             <i class="fa-solid fa-chart-line text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Stocks</span>
+        </button>
+        <button x-show="feeds.length" @click="viewMode = 'feeds'; activeFeedKey = null"
+                :class="viewMode === 'feeds' ? 'text-indigo-400' : 'text-slate-600'"
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'feeds' ? 'page' : 'false'">
+            <i class="fa-solid fa-rss text-[15px]" aria-hidden="true"></i>
+            <span class="text-[7px] font-black uppercase tracking-wider">Feeds</span>
         </button>
         {% if user.is_superuser %}
         <button @click="viewMode = 'command'"

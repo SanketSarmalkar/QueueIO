@@ -95,12 +95,36 @@ def dashboard(request):
     except Exception:
         stocks_json = {}
 
+    # Generic DashboardFeeds — the "Feeds" tab shows a card per feed; drilling into
+    # one reveals a tab per run (each scheduled run is stored as a new snapshot).
+    feeds_json = []
+    try:
+        from tasks.models import DashboardFeed
+        from tasks.config import MONGO_DB as _MDB
+        feed_coll = _MDB["dashboard_feeds"]
+        for f in DashboardFeed.objects.filter(is_active=True).order_by('title'):
+            runs = list(feed_coll.find(
+                {"feed_key": f.key},
+                {"_id": 0, "createdat": 0, "raw": 0, "feed_key": 0, "title": 0, "icon": 0},
+                sort=[("createdat", -1)],
+            ).limit(_FEED_HISTORY_LIMIT))
+            feeds_json.append({
+                "key": f.key,
+                "title": f.title,
+                "icon": f.icon or "fa-newspaper",
+                "render_type": f.render_type,
+                "runs": runs,  # newest first; empty until the feed has run once
+            })
+    except Exception:
+        feeds_json = []
+
     return render(request, 'dashboard.html', {
         'items_raw': formatted_items,
         'latest_id': formatted_items[0]['id'] if formatted_items else '',
         'tasks_json': tasks_list,
         'stacks_json': stacks_json,
         'stocks_json': stocks_json,
+        'feeds_json': feeds_json,
         'total_count': total,
         'has_more': 'true' if total > _PAGE_SIZE else 'false',
         'next_offset': _PAGE_SIZE,
@@ -271,6 +295,7 @@ def get_report_content(request, report_id):
     })
 
 _PAGE_SIZE = 50
+_FEED_HISTORY_LIMIT = 15  # how many recent runs (tabs) to load per dashboard feed
 _TEXT_INDEX_ENSURED = False
 _PLAYLIST_INDEX_ENSURED = False
 _ENTITY_STATS_CACHE = None
@@ -823,9 +848,12 @@ def cron_manager_view(request):
     # GET
     jobs = [_serialize_job(j) for j in CronJob.objects.all().order_by('-created_at')]
     task_keys = list(TaskConfiguration.objects.filter(is_active=True).values_list('task_key', flat=True))
+    from tasks.models import DashboardFeed
+    feed_keys = list(DashboardFeed.objects.filter(is_active=True).values_list('key', flat=True))
     return render(request, 'cron_manager.html', {
         'jobs_json': jobs,
         'task_keys_json': task_keys,
+        'feed_keys_json': feed_keys,
     })
 
 

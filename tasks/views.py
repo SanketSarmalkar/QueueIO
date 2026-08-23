@@ -107,6 +107,30 @@ def run_stocks_refresh(request):
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
+@csrf_exempt
+def run_feed_endpoint(request, feed_key):
+    """Run a generic DashboardFeed and store its latest LLM response.
+
+    Scheduled by a CronJob (endpoint mode) at /tasks/feed/<feed_key>/, or run
+    manually. `?force=1` overrides the idempotency skip.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST requests allowed'}, status=405)
+
+    if not _authorized(request):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    try:
+        from .script_custom.feed_pipeline import run_feed
+        force = request.GET.get('force', '').lower() in ('1', 'true', 'yes')
+        result = run_feed(feed_key, force=force)
+        status = 200 if result.get('status') in ('success', 'skipped') else 400
+        return JsonResponse(result, status=status)
+    except Exception as e:
+        logging.error(f"Feed run error ({feed_key}): {str(e)}")
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
 def video_page(request, video_id):
     return render(request, "video_page.html", {
         "video_id": video_id

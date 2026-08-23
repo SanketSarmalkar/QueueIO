@@ -21,6 +21,7 @@
 
     {{ jobs_json|json_script:"jobs-data" }}
     {{ task_keys_json|json_script:"task-keys-data" }}
+    {{ feed_keys_json|json_script:"feed-keys-data" }}
 
     <!-- Header -->
     <header class="h-14 bg-slate-900 flex items-center px-4 md:px-6 justify-between shadow-lg border-b border-slate-800 sticky top-0 z-50">
@@ -371,10 +372,15 @@
                 init() {
                     const jobsEl = document.getElementById('jobs-data');
                     const keysEl = document.getElementById('task-keys-data');
+                    const feedsEl = document.getElementById('feed-keys-data');
                     this.jobs     = jobsEl ? JSON.parse(jobsEl.textContent) : [];
                     this.taskKeys = keysEl ? JSON.parse(keysEl.textContent) : [];
                     for (const key of this.taskKeys) {
                         this.endpointPresets.push({ label: `Pipeline: ${key}`, path: `/tasks/queuei/${key}/` });
+                    }
+                    const feedKeys = feedsEl ? JSON.parse(feedsEl.textContent) : [];
+                    for (const key of feedKeys) {
+                        this.endpointPresets.push({ label: `Feed: ${key}`, path: `/tasks/feed/${key}/` });
                     }
                 },
 
