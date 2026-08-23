@@ -191,12 +191,18 @@ class YouTubeLLMPipeline:
         temp_doc = self.document_template.copy()
         for db_key, source_key in DOCUMENT_MAP.items():
             if source_key == "task_key":
-                temp_doc['task_key'] = self.category
+                temp_doc[db_key] = self.category
             elif source_key == "llm_result":
-                temp_doc['value'] = llm_result
+                temp_doc[db_key] = llm_result
             elif source_key == "timestamp":
                 v_date = video.get('date')
-                temp_doc['createdat'] = v_date if v_date else datetime.now(timezone.utc)
+                if v_date:
+                    try:
+                        temp_doc[db_key] = datetime.strptime(v_date, "%Y%m%d").replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        temp_doc[db_key] = datetime.now(timezone.utc)
+                else:
+                    temp_doc[db_key] = datetime.now(timezone.utc)
             else:
                 temp_doc[db_key] = video.get(source_key, None)
 

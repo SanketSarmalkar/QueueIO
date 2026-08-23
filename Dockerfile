@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     
 RUN pip install gunicorn whitenoise
 
+ARG CACHE_BUST=1
 COPY . /app/
 
 RUN DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy \

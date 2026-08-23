@@ -1,0 +1,128 @@
+<template x-if="viewMode === 'chat'">
+    <div class="h-full flex flex-col bg-slate-50 dark:bg-slate-950 relative pb-14 md:pb-0">
+
+        <div class="absolute top-3 right-3 md:top-4 md:right-6 z-10 flex gap-2">
+            <button @click="chatMessages = []; chatHistory = []"
+                    class="bg-slate-900/50 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-lg text-[9px] font-black text-slate-500 hover:text-red-400 transition-all uppercase tracking-widest"
+                    aria-label="Clear chat terminal">
+                <i class="fa-solid fa-trash-can mr-1" aria-hidden="true"></i> Clear Terminal
+            </button>
+        </div>
+
+        <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 custom-scrollbar"
+             role="log" aria-label="Chat messages" aria-live="polite">
+
+            <!-- Empty state with starter prompts -->
+            <template x-if="chatMessages.length === 0 && !chatLoading">
+                <div class="h-full flex flex-col items-center justify-center gap-8 py-12">
+                    <div class="text-center space-y-2">
+                        <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4" aria-hidden="true">
+                            <i class="fa-solid fa-bolt-lightning text-indigo-500 text-xl" aria-hidden="true"></i>
+                        </div>
+                        <h3 class="text-sm font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Intel Chat</h3>
+                        <p class="text-xs text-slate-400 font-mono">RAG-powered search across your entire archive</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl" role="list" aria-label="Starter prompts">
+                        <template x-for="prompt in [
+                            'What are the most discussed topics recently?',
+                            'Summarise key events involving India this week',
+                            'Which organisations appear most frequently?',
+                            'What geopolitical risks are emerging?',
+                            'Find reports about economic policy changes',
+                            'What are the latest developments in the archive?'
+                        ]" :key="prompt">
+                            <button @click="sendChatQuery(prompt)"
+                                    class="text-left bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/40 dark:hover:border-indigo-500/40 rounded-xl px-4 py-3 text-[11px] text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all group"
+                                    role="listitem">
+                                <i class="fa-solid fa-arrow-right text-[8px] mr-2 text-slate-300 dark:text-slate-700 group-hover:text-indigo-500 transition-colors" aria-hidden="true"></i>
+                                <span x-text="prompt"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <div class="space-y-8 md:space-y-10">
+                <template x-for="(msg, index) in chatMessages" :key="index">
+                    <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
+
+                        <span class="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2 px-2"
+                              x-text="msg.role === 'user' ? 'Operator Query' : 'System Intelligence'"></span>
+
+                        <div :class="msg.role === 'user'
+                            ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-2xl shadow-indigo-500/20 px-5 py-3 md:px-6 md:py-4'
+                            : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none shadow-xl p-6 md:p-8'"
+                            class="max-w-[85%] relative">
+
+                            <template x-if="msg.role === 'ai'">
+                                <div class="absolute top-0 left-0 w-1 h-full bg-indigo-500 rounded-tl-2xl" aria-hidden="true"></div>
+                            </template>
+
+                            <div class="prose prose-sm dark:prose-invert leading-relaxed" x-html="msg.text"></div>
+
+                            <template x-if="msg.sources && msg.sources.length > 0">
+                                <div class="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
+                                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
+                                        <i class="fa-solid fa-link text-indigo-500" aria-hidden="true"></i> Sources
+                                    </p>
+                                    <div class="flex flex-wrap gap-2">
+                                        <template x-for="src in msg.sources" :key="src.id">
+                                            <button @click="jumpToSource(src)"
+                                                    class="bg-indigo-500/5 hover:bg-indigo-500/15 border border-indigo-500/20 px-3 py-2 rounded-lg transition-all flex flex-col items-start gap-0.5 group/btn text-left"
+                                                    :aria-label="'Jump to source: ' + src.title">
+                                                <span class="text-[10px] font-semibold text-indigo-400 group-hover/btn:text-indigo-300 leading-tight" x-text="src.title"></span>
+                                                <div class="flex items-center gap-2">
+                                                    <span x-show="src.playlist_title" class="text-[8px] font-mono text-slate-500" x-text="src.playlist_title"></span>
+                                                    <span x-show="src.date" class="text-[8px] font-mono text-slate-600" x-text="src.date"></span>
+                                                </div>
+                                            </button>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <div x-show="chatLoading" class="flex flex-col gap-4 animate-pulse" role="status" aria-label="Loading response">
+                    <div class="flex items-center gap-3 text-indigo-500 font-mono text-[9px] tracking-[0.3em]">
+                        <i class="fa-solid fa-microchip animate-spin" aria-hidden="true"></i> CROSS-REFERENCING ARCHIVE...
+                    </div>
+                    <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 md:p-8 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800" role="region" aria-label="Message input">
+            <div class="max-w-5xl mx-auto">
+                <!-- History indicator -->
+                <div x-show="chatHistory.length > 0" class="flex items-center gap-2 mb-2 px-1">
+                    <span class="text-[8px] font-mono text-indigo-500/70 uppercase tracking-widest">
+                        <i class="fa-solid fa-circle-nodes mr-1" aria-hidden="true"></i>
+                        <span x-text="Math.floor(chatHistory.length / 2) + ' turn' + (chatHistory.length > 2 ? 's' : '') + ' in context'"></span>
+                    </span>
+                </div>
+                <div class="relative">
+                    <label for="chat-input" class="sr-only">Ask a question about the archive</label>
+                    <input
+                        id="chat-input"
+                        type="text"
+                        x-model="chatQuery"
+                        @keyup.enter.prevent="sendChatQuery()"
+                        placeholder="Ask a follow-up or start a new query..."
+                        class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-3 md:py-5 pl-5 md:pl-8 pr-14 md:pr-20 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-inner font-medium"
+                        autocomplete="off"
+                    >
+                    <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                        <span class="text-[8px] font-black text-slate-500 uppercase mr-2 hidden md:block" aria-hidden="true">Enter ↵</span>
+                        <button @click="sendChatQuery()"
+                                class="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center"
+                                aria-label="Send query">
+                            <i class="fa-solid fa-bolt-lightning text-xs" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>

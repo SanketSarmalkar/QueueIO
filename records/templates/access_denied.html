@@ -1,44 +1,42 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Access Denied — Queue IO</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .dot-grid {
-            background-image: radial-gradient(#1e293b 1px, transparent 1px);
-            background-size: 28px 28px;
-        }
-    </style>
-</head>
-<body class="bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-6">
-    <div class="text-center max-w-md">
-        <!-- Icon -->
-        <div class="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-red-500/8 border border-red-500/20 mb-8">
-            <i class="fa-solid fa-user-slash text-red-500 text-3xl"></i>
-        </div>
+{% extends "base.html" %}
+{% load static %}
 
-        <!-- Code badge -->
-        <div class="inline-flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-full px-3 py-1 mb-5">
-            <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
-            <span class="text-red-400 text-[9px] font-black uppercase tracking-[0.3em]">Clearance Required</span>
-        </div>
+{% block title %}Access Denied — Queuei{% endblock %}
+{% block meta_description %}You do not have the required clearance to access this resource.{% endblock %}
 
-        <h1 class="text-white text-3xl font-black uppercase tracking-tighter mb-3">
-            Access <span class="text-red-500">Blocked</span>
-        </h1>
-        <p class="text-slate-500 text-xs font-mono leading-relaxed mb-8">
-            Your identity has been verified, but your clearance level is currently
-            <span class="text-red-400 font-bold">UNASSIGNED</span>.
-            Contact a System Supervisor to authorize your access.
-        </p>
+{% block body_class %}bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-6{% endblock %}
 
-        <a href="{% url 'logout' %}"
-           class="inline-flex items-center gap-2 border border-slate-800 hover:border-slate-600 text-slate-500 hover:text-white text-[10px] font-black uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all">
-            <i class="fa-solid fa-power-off text-[9px]"></i> Exit Terminal
-        </a>
+{% block body %}
+<main class="text-center max-w-md" aria-label="Access denied">
+
+    <!-- Icon -->
+    <div class="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-red-500/8 border border-red-500/20 mb-8"
+         aria-hidden="true">
+        <i class="fa-solid fa-user-slash text-red-500 text-3xl"></i>
     </div>
-</body>
-</html>
+
+    <!-- Status badge -->
+    <div class="inline-flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-full px-3 py-1 mb-5"
+         role="status">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" aria-hidden="true"></span>
+        <span class="text-red-400 text-[9px] font-black uppercase tracking-[0.3em]">Clearance Required</span>
+    </div>
+
+    <h1 class="text-white text-3xl font-black uppercase tracking-tighter mb-3">
+        Access <span class="text-red-500">Blocked</span>
+    </h1>
+
+    <p class="text-slate-500 text-xs font-mono leading-relaxed mb-8 max-w-xs mx-auto">
+        Your identity has been verified, but your clearance level is currently
+        <span class="text-red-400 font-bold">UNASSIGNED</span>.
+        Contact a System Supervisor to authorise your access.
+    </p>
+
+    <a href="{% url 'logout' %}"
+       class="inline-flex items-center gap-2 border border-slate-800 hover:border-slate-600 text-slate-500 hover:text-white text-[10px] font-black uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all">
+        <i class="fa-solid fa-power-off text-[9px]" aria-hidden="true"></i>
+        Exit Terminal
+    </a>
+
+</main>
+{% endblock %}

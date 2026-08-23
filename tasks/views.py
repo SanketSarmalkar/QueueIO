@@ -2,18 +2,28 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 import logging
 import json
+import os
 from django.shortcuts import render
 from .script_custom.youtube_llm_pipeline import YouTubeLLMPipeline
 from .script_custom.slack_alerting import send_slack_alert
 
+_TASK_SECRET = os.getenv('TASK_SECRET', '')
+
+
+def _authorized(request):
+    """Return True if the request carries a valid task secret (or none is configured)."""
+    if not _TASK_SECRET:
+        return True
+    return request.headers.get('X-Task-Secret', '') == _TASK_SECRET
+
+
 @csrf_exempt
 def run_task(request, task_key):
-    """
-    Triggers the pipeline for a specific task key.
-    Endpoint: /queuei/summarize/ or /queuei/extract_action_items/
-    """
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST requests allowed'}, status=405)
+
+    if not _authorized(request):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
 
     try:
         pipeline = YouTubeLLMPipeline(task_key=task_key)
@@ -38,9 +48,11 @@ def run_task(request, task_key):
 
 @csrf_exempt
 def slack_alert(request):
-
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST requests allowed'}, status=405)
+
+    if not _authorized(request):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
 
     try:
         # SAFE JSON PARSING

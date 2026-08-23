@@ -1,0 +1,40 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="{% block html_class %}{% endblock %}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="{% block meta_description %}Queuei — YouTube Intelligence Terminal{% endblock %}">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="{% block og_title %}Queuei{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}Self-hosted YouTube intelligence platform powered by Gemini.{% endblock %}">
+    <meta property="og:type" content="website">
+
+    <title>{% block title %}Queuei{% endblock %}</title>
+
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'favicon.png' %}">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+          integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer">
+
+    {% block head_extra %}{% endblock %}
+
+    <style>
+        .dot-grid {
+            background-image: radial-gradient(#1e293b 1px, transparent 1px);
+            background-size: 28px 28px;
+        }
+    </style>
+</head>
+<body class="{% block body_class %}bg-slate-950 font-sans{% endblock %}">
+    {% block body %}{% endblock %}
+</body>
+</html>
