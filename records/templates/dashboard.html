@@ -67,6 +67,11 @@
                 insightsLoading: false,
                 usageData: null,
                 usageLoading: false,
+                stocksData: null,
+                stocksLoading: false,
+                stocksSort: 'overall',
+                stocksSearch: '',
+                stockDetail: null,
                 hoverNode: null,
                 nexusLoading: false,
                 nexusMouseX: 0,
@@ -85,10 +90,15 @@
                         const itemsData = document.getElementById('items-data');
                         const tasksData = document.getElementById('tasks-data');
                         const stacksData = document.getElementById('stacks-data');
+                        const stocksEl = document.getElementById('stocks-data');
 
                         this.items = itemsData ? JSON.parse(itemsData.textContent) : [];
                         this.tasks = tasksData ? JSON.parse(tasksData.textContent) : [];
                         this.stacks = stacksData ? JSON.parse(stacksData.textContent) : [];
+                        // Stock snapshot is injected server-side (like stacks); a null/empty
+                        // object means no snapshot has been generated yet.
+                        const stocksParsed = stocksEl ? JSON.parse(stocksEl.textContent) : null;
+                        this.stocksData = (stocksParsed && Object.keys(stocksParsed).length) ? stocksParsed : null;
                         this.totalCount = {{ total_count }};
                         this.hasMore = {{ has_more }};
                         this.nextOffset = {{ next_offset }};
@@ -558,6 +568,61 @@
                     }
                 },
 
+                async loadStocks() {
+                    // Only fetch once; the daily snapshot doesn't change intraday.
+                    if (this.stocksData || this.stocksLoading) return;
+                    this.stocksLoading = true;
+                    try {
+                        const r = await fetch('/stocks-data/');
+                        this.stocksData = await r.json();
+                    } catch(e) {
+                        this.stocksData = null;
+                    } finally {
+                        this.stocksLoading = false;
+                    }
+                },
+
+                stocksRows() {
+                    const d = this.stocksData;
+                    if (!d || !d.rows) return [];
+                    let rows = d.rows;
+                    const q = (this.stocksSearch || '').trim().toLowerCase();
+                    if (q) {
+                        rows = rows.filter(r =>
+                            (r.symbol || '').toLowerCase().includes(q) ||
+                            (r.name || '').toLowerCase().includes(q));
+                    }
+                    const key = this.stocksSort;
+                    return [...rows].sort((a, b) => {
+                        const av = a[key], bv = b[key];
+                        if (av == null && bv == null) return 0;
+                        if (av == null) return 1;
+                        if (bv == null) return -1;
+                        return bv - av; // high-to-low for all numeric score/return keys
+                    });
+                },
+
+                scoreColor(v) {
+                    if (v == null) return 'text-slate-400';
+                    if (v >= 65) return 'text-emerald-500 font-bold';
+                    if (v >= 45) return 'text-amber-500 font-semibold';
+                    return 'text-rose-500 font-semibold';
+                },
+                signalClass(sig) {
+                    if (sig === 'Bullish') return 'bg-emerald-500/15 text-emerald-500';
+                    if (sig === 'Neutral') return 'bg-amber-500/15 text-amber-500';
+                    if (sig === 'Bearish') return 'bg-rose-500/15 text-rose-500';
+                    return 'bg-slate-500/10 text-slate-400';
+                },
+                fmtNum(v, digits = 2) {
+                    if (v == null || isNaN(v)) return '—';
+                    return Number(v).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+                },
+                fmtPct(v) {
+                    if (v == null || isNaN(v)) return '—';
+                    return (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+                },
+
                 onMainScroll(event) {
                     if (this.viewMode !== 'entries') { this.readingProgress = 0; return; }
                     const el = event.target;
@@ -604,6 +669,7 @@
     {{ items_raw|json_script:"items-data" }}
     {{ tasks_json|json_script:"tasks-data" }}
     {{ stacks_json|json_script:"stacks-data" }}
+    {{ stocks_json|json_script:"stocks-data" }}
 
     <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between z-50 border-b border-slate-800 shrink-0">
         <!-- Left: logo + sidebar toggle -->
@@ -662,6 +728,12 @@
                     class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
                     :aria-current="viewMode === 'usage' ? 'page' : 'false'">
                 <i class="fa-solid fa-gauge-high text-[9px]" aria-hidden="true"></i> Usage
+            </button>
+            <button @click="viewMode = 'stocks_tab'; loadStocks()"
+                    :class="viewMode === 'stocks_tab' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'stocks_tab' ? 'page' : 'false'">
+                <i class="fa-solid fa-chart-line text-[9px]" aria-hidden="true"></i> Stocks
             </button>
             {% if user.is_superuser %}
             <button @click="viewMode = 'command'"
@@ -726,6 +798,7 @@
             {% include "partials/dash_view_nexus.html" %}
             {% include "partials/dash_view_usage.html" %}
             {% include "partials/dash_view_insights.html" %}
+            {% include "partials/dash_view_stocks_tab.html" %}
         </main>
     </div>
 
@@ -765,6 +838,13 @@
                 :aria-current="viewMode === 'usage' ? 'page' : 'false'">
             <i class="fa-solid fa-gauge-high text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Usage</span>
+        </button>
+        <button @click="viewMode = 'stocks_tab'; loadStocks()"
+                :class="viewMode === 'stocks_tab' ? 'text-indigo-400' : 'text-slate-600'"
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'stocks_tab' ? 'page' : 'false'">
+            <i class="fa-solid fa-chart-line text-[15px]" aria-hidden="true"></i>
+            <span class="text-[7px] font-black uppercase tracking-wider">Stocks</span>
         </button>
         {% if user.is_superuser %}
         <button @click="viewMode = 'command'"

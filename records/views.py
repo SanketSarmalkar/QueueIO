@@ -83,11 +83,24 @@ def dashboard(request):
         'id', 'task_key', 'display_name', 'prompt_template', 'target_collection', 'is_active'
     ))
 
+    # Latest NASDAQ stock scorecard snapshot — injected server-side and rendered
+    # inline in the Stocks tab, the same way `stacks_json` feeds the Stacks view.
+    try:
+        from tasks.config import MONGO_DB
+        stocks_json = MONGO_DB["stock_results"].find_one(
+            {"scored_count": {"$gt": 0}},
+            {"_id": 0, "failed": 0, "createdat": 0},
+            sort=[("createdat", -1)],
+        ) or {}
+    except Exception:
+        stocks_json = {}
+
     return render(request, 'dashboard.html', {
         'items_raw': formatted_items,
         'latest_id': formatted_items[0]['id'] if formatted_items else '',
         'tasks_json': tasks_list,
         'stacks_json': stacks_json,
+        'stocks_json': stocks_json,
         'total_count': total,
         'has_more': 'true' if total > _PAGE_SIZE else 'false',
         'next_offset': _PAGE_SIZE,
@@ -448,6 +461,31 @@ def get_usage_stats(request):
             'tpd': _FREE_TIER_TPD,
         },
     })
+
+@login_required
+def get_stocks_data(request):
+    """Return the most recent NASDAQ stock-scorecard snapshot for the Stocks tab.
+
+    The heavy analysis runs in the daily 9 AM CronJob and is stored in MongoDB
+    (`stock_results`); this endpoint just serves the latest snapshot.
+    """
+    from tasks.config import MONGO_DB
+
+    try:
+        collection = MONGO_DB["stock_results"]
+        snap = collection.find_one(
+            {"scored_count": {"$gt": 0}},
+            {"_id": 0, "failed": 0, "createdat": 0},
+            sort=[("createdat", -1)],
+        )
+    except Exception as e:
+        return JsonResponse({"error": str(e), "rows": []}, status=200)
+
+    if not snap:
+        return JsonResponse({"empty": True, "rows": []})
+
+    return JsonResponse(snap)
+
 
 def _format_record(item):
     created_at = item.get('createdat')

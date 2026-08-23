@@ -81,6 +81,32 @@ def slack_alert(request):
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
     
 
+@csrf_exempt
+def run_stocks_refresh(request):
+    """Run the NASDAQ stock scorecard and store a daily snapshot in MongoDB.
+
+    Called by the 9 AM CronJob (endpoint mode) or the Command Center "Run now".
+    The analysis fetches ~2y history for the NASDAQ-100 and takes a couple of
+    minutes — fine here since it runs in the scheduler's background thread.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST requests allowed'}, status=405)
+
+    if not _authorized(request):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    try:
+        from .script_custom.stock_pipeline import run_stock_analysis
+        # Scheduled runs post with no params (idempotent). A human can force a
+        # re-run with ?force=1 to override the "recent snapshot exists" skip.
+        force = request.GET.get('force', '').lower() in ('1', 'true', 'yes')
+        result = run_stock_analysis(force=force)
+        return JsonResponse(result)
+    except Exception as e:
+        logging.error(f"Stock refresh error: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
 def video_page(request, video_id):
     return render(request, "video_page.html", {
         "video_id": video_id

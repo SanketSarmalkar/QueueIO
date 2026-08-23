@@ -9,4 +9,5 @@ urlpatterns = [
     path("video/<str:video_id>/", views.video_page, name="video_page"),
     path("playlist_fix/", migrate.backfill_playlist_data),
     path("backfill_entities/", backfill_entity.backfill_entities),
+    path("stocks_refresh/", views.run_stocks_refresh, name="run_stocks_refresh"),
 ]

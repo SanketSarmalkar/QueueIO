@@ -20,4 +20,5 @@ urlpatterns = [
     path('cron/', views.cron_manager_view, name='cron_manager'),
     path('entity-stats/', views.get_entity_stats, name='entity_stats'),
     path('usage-stats/', views.get_usage_stats, name='usage_stats'),
+    path('stocks-data/', views.get_stocks_data, name='stocks_data'),
 ]
