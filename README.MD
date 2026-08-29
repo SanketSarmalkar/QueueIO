@@ -14,12 +14,27 @@
 [![Gemini](https://img.shields.io/badge/Google-Gemini-4285F4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+[![Docs](https://img.shields.io/badge/Docs-queueio.org%2Fdocs-6366F1?style=flat-square&logo=readthedocs&logoColor=white)](https://queueio.org/docs)
 
 <br/>
 
 > A self-hosted platform that watches your YouTube playlists, processes every video through a configurable Gemini prompt, and surfaces the intelligence through a dark-mode SPA — complete with RAG chat, entity relationship graphs, full-text search, and live analytics.
 
+**📖 Full documentation → [queueio.org/docs](https://queueio.org/docs)**
+
 </div>
+
+---
+
+## 📖 Documentation
+
+Complete docs — architecture, the pipeline, transcript sources, configuration, scheduling, data models, the endpoint reference, and environment variables — live at:
+
+### **[queueio.org/docs](https://queueio.org/docs)**
+
+Every deployment also ships the same docs portal built in, served from **`/doc/`** on your own instance (e.g. `http://localhost:8000/doc/`). It's an OpenMetadata-style handbook with a scroll-spy sidebar covering architecture, the pipeline, transcript sources, configuration, scheduling, data models, the endpoint reference, and environment-variable names.
+
+> **Public by design.** `/doc/` requires **no authentication** — it's meant to be hosted openly. It is purely static technical reference: it reads nothing from the database and exposes no instance configuration, secrets, or credential values. A **Docs** link sits in the dashboard header for logged-in users too.
 
 ---
 
@@ -173,7 +188,13 @@ pip install -r requirements.txt
 
 ### 2 · Configure environment
 
-Create `.env` in the project root:
+Copy the template and fill in your values:
+
+```bash
+cp .env-example .env
+```
+
+The full `.env` looks like this:
 
 ```env
 # ── Django ────────────────────────────────────────────
@@ -332,6 +353,7 @@ flowchart LR
 | `GET` | `/nexus-data/` | Login | Force-graph nodes + links JSON |
 | `GET` | `/entity-stats/` | Login | Entity counts + archive metrics (10 min cache) |
 | `GET` | `/usage-stats/` | Login | Gemini API usage by day |
+| `GET` | `/doc/` | **Public** | Built-in documentation portal — static tech reference, no auth |
 | `POST` | `/command-center/` | Supervisor | Task CRUD |
 | `POST` | `/settings/` | Superuser | GlobalSetting upsert |
 | `GET/POST` | `/cron/` | Superuser | Cron job management |

@@ -31,8 +31,6 @@
       x-data="docsApp" x-init="init()"
       :class="{ 'overflow-hidden': sidebarOpen }">
 
-    {{ metadata_json|json_script:"metadata-data" }}
-
     <!-- ── Header ─────────────────────────────────────────────────────────── -->
     <header class="h-14 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 flex items-center px-4 md:px-6 justify-between">
         <div class="flex items-center gap-3">
@@ -50,15 +48,12 @@
             </a>
         </div>
         <nav class="flex items-center gap-2 md:gap-5" aria-label="Primary navigation">
-            <a href="/" class="px-2 md:px-3 py-1.5 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center gap-1.5">
-                <i class="fa-solid fa-house text-[9px]"></i><span class="hidden md:inline">Dashboard</span>
+            <a href="#overview" class="px-2 md:px-3 py-1.5 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center gap-1.5">
+                <i class="fa-solid fa-book text-[9px]"></i><span class="hidden md:inline">Docs</span>
             </a>
-            <a href="{% url 'intel_chat' %}" class="px-2 md:px-3 py-1.5 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center gap-1.5">
-                <i class="fa-solid fa-comment-dots text-[9px]"></i><span class="hidden md:inline">Chat</span>
-            </a>
-            <a href="{% url 'logout' %}"
-               class="flex items-center gap-1.5 text-slate-400 hover:text-red-400 transition-colors text-[10px] font-mono uppercase border-l border-slate-700 pl-3 md:pl-5">
-                <i class="fa-solid fa-power-off"></i><span class="hidden md:inline">Logout</span>
+            <a href="/"
+               class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white transition-colors text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg">
+                <i class="fa-solid fa-arrow-right-to-bracket text-[9px]"></i><span>Open App</span>
             </a>
         </nav>
     </header>
@@ -372,118 +367,6 @@ python manage.py makemigrations
                 <p class="text-sm text-slate-400">The container entrypoint runs <code>migrate</code> then gunicorn on port 8000 with <code>--env-file .env</code>. The scheduler boots inside the web process and hot-loads cron jobs from the DB.</p>
             </section>
 
-            {# ─────────────────────────── LIVE METADATA ─────────────────────────── #}
-            <section id="live" class="doc-section mb-14">
-                {% include "partials/doc_heading.html" with icon="fa-wave-square" title="This Instance" %}
-                <p class="mb-6 text-sm text-slate-400">A live snapshot of what's configured right now — read directly from the database.</p>
-
-                <!-- Tasks -->
-                <div class="mb-8">
-                    <div class="flex items-center gap-2 mb-3">
-                        <i class="fa-solid fa-terminal text-indigo-400 text-xs"></i>
-                        <h3 class="text-white font-bold text-sm">Tasks</h3>
-                        <span class="text-[10px] font-mono text-slate-600" x-text="'(' + meta.tasks.length + ')'"></span>
-                    </div>
-                    <template x-if="meta.tasks.length">
-                        <div class="grid sm:grid-cols-2 gap-2.5">
-                            <template x-for="t in meta.tasks" :key="t.task_key">
-                                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5">
-                                    <div class="flex items-center justify-between mb-1">
-                                        <span class="text-white text-sm font-bold" x-text="t.display_name"></span>
-                                        <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full"
-                                              :class="t.is_active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700 text-slate-500'"
-                                              x-text="t.is_active ? 'active' : 'off'"></span>
-                                    </div>
-                                    <p class="font-mono text-[11px] text-indigo-300" x-text="t.task_key"></p>
-                                    <p class="font-mono text-[10px] text-slate-600 mt-0.5">→ <span x-text="t.target_collection"></span></p>
-                                </div>
-                            </template>
-                        </div>
-                    </template>
-                    <p x-show="!meta.tasks.length" class="text-xs text-slate-600 font-mono">No tasks configured.</p>
-                </div>
-
-                <!-- Feeds -->
-                <div class="mb-8">
-                    <div class="flex items-center gap-2 mb-3">
-                        <i class="fa-solid fa-newspaper text-amber-400 text-xs"></i>
-                        <h3 class="text-white font-bold text-sm">Feeds</h3>
-                        <span class="text-[10px] font-mono text-slate-600" x-text="'(' + meta.feeds.length + ')'"></span>
-                    </div>
-                    <template x-if="meta.feeds.length">
-                        <div class="grid sm:grid-cols-2 gap-2.5">
-                            <template x-for="f in meta.feeds" :key="f.key">
-                                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-center gap-3">
-                                    <i class="fa-solid text-amber-400" :class="f.icon"></i>
-                                    <div class="min-w-0 flex-1">
-                                        <p class="text-white text-sm font-bold truncate" x-text="f.title"></p>
-                                        <p class="font-mono text-[10px] text-slate-600">
-                                            <span x-text="f.key"></span> · <span x-text="f.render_type"></span> · <span x-text="f.ai_model"></span>
-                                        </p>
-                                    </div>
-                                    <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full shrink-0"
-                                          :class="f.is_active ? 'bg-emerald-500/15 text-emerald-400' : 'bg-slate-700 text-slate-500'"
-                                          x-text="f.is_active ? 'on' : 'off'"></span>
-                                </div>
-                            </template>
-                        </div>
-                    </template>
-                    <p x-show="!meta.feeds.length" class="text-xs text-slate-600 font-mono">No feeds defined.</p>
-                </div>
-
-                <!-- Crons -->
-                <div class="mb-8">
-                    <div class="flex items-center gap-2 mb-3">
-                        <i class="fa-solid fa-clock text-sky-400 text-xs"></i>
-                        <h3 class="text-white font-bold text-sm">Scheduled jobs</h3>
-                        <span class="text-[10px] font-mono text-slate-600" x-text="'(' + meta.crons.length + ')'"></span>
-                    </div>
-                    <template x-if="meta.crons.length">
-                        <div class="overflow-x-auto rounded-xl border border-slate-800">
-                            <table class="w-full text-[13px]">
-                                <thead class="bg-slate-900 text-slate-500 text-[10px] uppercase tracking-wider">
-                                    <tr><th class="px-3 py-2 text-left">Name</th><th class="px-3 py-2 text-left">Type</th><th class="px-3 py-2 text-left">Target</th><th class="px-3 py-2 text-left">Cron</th><th class="px-3 py-2 text-left">Last run</th></tr>
-                                </thead>
-                                <tbody class="divide-y divide-slate-800">
-                                    <template x-for="c in meta.crons" :key="c.name">
-                                        <tr :class="c.is_active ? '' : 'opacity-40'">
-                                            <td class="px-3 py-2.5 text-white font-medium" x-text="c.name"></td>
-                                            <td class="px-3 py-2.5 font-mono text-slate-500" x-text="c.job_type"></td>
-                                            <td class="px-3 py-2.5 font-mono text-indigo-300" x-text="c.task_key || c.endpoint_url || '—'"></td>
-                                            <td class="px-3 py-2.5 font-mono text-amber-300" x-text="c.cron_expression"></td>
-                                            <td class="px-3 py-2.5 font-mono text-slate-600" x-text="c.last_run_at || 'never'"></td>
-                                        </tr>
-                                    </template>
-                                </tbody>
-                            </table>
-                        </div>
-                    </template>
-                    <p x-show="!meta.crons.length" class="text-xs text-slate-600 font-mono">No cron jobs scheduled.</p>
-                </div>
-
-                <!-- Settings -->
-                <div>
-                    <div class="flex items-center gap-2 mb-3">
-                        <i class="fa-solid fa-gear text-slate-400 text-xs"></i>
-                        <h3 class="text-white font-bold text-sm">Global settings</h3>
-                        <span class="text-[10px] font-mono text-slate-600" x-text="'(' + meta.settings.length + ')'"></span>
-                    </div>
-                    <template x-if="meta.settings.length">
-                        <div class="flex flex-wrap gap-2">
-                            <template x-for="s in meta.settings" :key="s.key">
-                                <span class="text-[11px] font-mono px-2.5 py-1 rounded-lg border"
-                                      :class="s.is_known ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400'"
-                                      x-text="s.key" :title="s.description"></span>
-                            </template>
-                        </div>
-                    </template>
-                    <p x-show="!meta.settings.length" class="text-xs text-slate-600 font-mono">No settings stored yet.</p>
-                    <p x-show="meta.is_superuser" class="text-xs text-slate-600 mt-3">
-                        Edit these on the <a href="{% url 'settings' %}" class="text-indigo-400 hover:underline">Settings</a> page.
-                    </p>
-                </div>
-            </section>
-
             <footer class="border-t border-slate-800 pt-6 mt-16 text-xs text-slate-600 font-mono flex flex-wrap items-center justify-between gap-2">
                 <span>Queuei — self-hosted intelligence terminal.</span>
                 <a href="#overview" class="hover:text-indigo-400"><i class="fa-solid fa-arrow-up mr-1"></i>Back to top</a>
@@ -498,7 +381,6 @@ python manage.py makemigrations
                 sidebarOpen: false,
                 active: 'overview',
                 query: '',
-                meta: { tasks: [], feeds: [], crons: [], settings: [], is_superuser: false },
                 nav: [
                     { title: 'Introduction', items: [
                         { id: 'overview',     label: 'Overview',            icon: 'fa-compass' },
@@ -520,15 +402,9 @@ python manage.py makemigrations
                         { id: 'env',    label: 'Environment',          icon: 'fa-key' },
                         { id: 'access', label: 'Access Control',       icon: 'fa-user-shield' },
                     ]},
-                    { title: 'Live', items: [
-                        { id: 'live', label: 'This Instance',         icon: 'fa-wave-square' },
-                    ]},
                 ],
 
                 init() {
-                    const raw = document.getElementById('metadata-data');
-                    if (raw) { try { this.meta = JSON.parse(raw.textContent); } catch (e) {} }
-
                     // scroll-spy
                     const opts = { rootMargin: '-15% 0px -70% 0px', threshold: 0 };
                     const obs = new IntersectionObserver((entries) => {
