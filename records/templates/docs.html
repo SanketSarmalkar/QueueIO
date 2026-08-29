@@ -1,0 +1,429 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="Queuei — full project documentation, architecture, API reference, and live instance metadata.">
+    <title>Docs — Queuei</title>
+    <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'favicon.png' %}">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+          integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer">
+    <style>
+        html { scroll-behavior: smooth; }
+        /* offset anchored sections so the sticky header doesn't cover them */
+        [id].doc-section { scroll-margin-top: 5rem; }
+        .doc-body { line-height: 1.7; }
+        .doc-body h3 { scroll-margin-top: 5rem; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        .prose-table th { text-align: left; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-300 font-sans antialiased"
+      x-data="docsApp" x-init="init()"
+      :class="{ 'overflow-hidden': sidebarOpen }">
+
+    <!-- ── Header ─────────────────────────────────────────────────────────── -->
+    <header class="h-14 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 flex items-center px-4 md:px-6 justify-between">
+        <div class="flex items-center gap-3">
+            <button @click="sidebarOpen = !sidebarOpen"
+                    class="lg:hidden text-slate-400 hover:text-white w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800"
+                    aria-label="Toggle navigation">
+                <i class="fa-solid" :class="sidebarOpen ? 'fa-xmark' : 'fa-bars'"></i>
+            </button>
+            <a href="/" class="flex items-center gap-3" aria-label="Back to dashboard">
+                <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-9 h-9 rounded-lg object-cover border border-slate-700/50">
+                <span class="font-black tracking-tighter text-lg uppercase text-white hidden sm:block">
+                    Queue <span class="text-indigo-400">IO</span>
+                </span>
+                <span class="text-[9px] font-mono uppercase tracking-[0.25em] text-slate-600 border-l border-slate-700 pl-3 hidden md:inline">Documentation</span>
+            </a>
+        </div>
+        <nav class="flex items-center gap-2 md:gap-5" aria-label="Primary navigation">
+            <a href="#overview" class="px-2 md:px-3 py-1.5 rounded text-[10px] font-bold uppercase text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center gap-1.5">
+                <i class="fa-solid fa-book text-[9px]"></i><span class="hidden md:inline">Docs</span>
+            </a>
+            <a href="/"
+               class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white transition-colors text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg">
+                <i class="fa-solid fa-arrow-right-to-bracket text-[9px]"></i><span>Open App</span>
+            </a>
+        </nav>
+    </header>
+
+    <div class="flex max-w-[1500px] mx-auto">
+
+        <!-- ── Sidebar overlay (mobile) ───────────────────────────────────── -->
+        <div x-show="sidebarOpen" x-transition.opacity
+             @click="sidebarOpen = false"
+             class="fixed inset-0 top-14 bg-black/60 z-30 lg:hidden" aria-hidden="true"></div>
+
+        <!-- ── Sidebar nav ────────────────────────────────────────────────── -->
+        <aside class="fixed lg:sticky top-14 left-0 z-30 h-[calc(100dvh-3.5rem)] w-72 shrink-0
+                      bg-slate-900 lg:bg-transparent border-r border-slate-800 overflow-y-auto
+                      transition-transform duration-200"
+               :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'">
+            <div class="p-4">
+                <!-- search -->
+                <div class="relative mb-4">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-[10px]"></i>
+                    <input type="text" x-model="query" placeholder="Filter docs…"
+                           class="w-full bg-slate-800/70 border border-slate-800 focus:border-indigo-500 rounded-lg pl-8 pr-3 py-2 text-xs text-slate-200 outline-none transition-colors">
+                </div>
+
+                <nav class="space-y-5 pb-10" aria-label="Documentation sections">
+                    <template x-for="group in filteredNav" :key="group.title">
+                        <div>
+                            <p class="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600 px-2 mb-1.5" x-text="group.title"></p>
+                            <ul class="space-y-0.5">
+                                <template x-for="item in group.items" :key="item.id">
+                                    <li>
+                                        <a :href="'#' + item.id"
+                                           @click="sidebarOpen = false"
+                                           class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-[13px] transition-colors"
+                                           :class="active === item.id ? 'bg-indigo-500/15 text-indigo-300 font-semibold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'">
+                                            <i class="fa-solid text-[10px] w-3.5 text-center" :class="item.icon"></i>
+                                            <span x-text="item.label"></span>
+                                        </a>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
+                </nav>
+            </div>
+        </aside>
+
+        <!-- ── Main content ───────────────────────────────────────────────── -->
+        <main class="flex-1 min-w-0 px-5 md:px-10 py-8 md:py-12 doc-body">
+
+            <!-- Hero -->
+            <div class="mb-12">
+                <p class="text-[10px] font-mono text-indigo-400 uppercase tracking-[0.3em] mb-3">Project Documentation</p>
+                <h1 class="text-3xl md:text-5xl font-black tracking-tighter text-white leading-none mb-4">
+                    Queuei <span class="text-indigo-400">Handbook</span>
+                </h1>
+                <p class="text-slate-400 text-sm md:text-base max-w-2xl">
+                    A self-hosted intelligence platform. It ingests YouTube playlists, distils each video
+                    into structured intelligence with Gemini, stores everything in a searchable vector store,
+                    and surfaces it through a terminal-style dashboard — plus a generic
+                    <em class="text-slate-300 not-italic font-medium">scheduled-LLM feed</em> engine you can point at anything.
+                </p>
+                <div class="flex flex-wrap gap-2 mt-6">
+                    <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Django</span>
+                    <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">PostgreSQL + MongoDB</span>
+                    <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Gemini</span>
+                    <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">APScheduler</span>
+                    <span class="text-[10px] font-mono px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Alpine + Tailwind</span>
+                </div>
+            </div>
+
+            {# ─────────────────────────── OVERVIEW ─────────────────────────── #}
+            <section id="overview" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-compass" title="Overview" %}
+                <p class="mb-4">
+                    Queuei turns a stream of long-form video into a queryable knowledge base. Every video in a monitored
+                    playlist flows through a pipeline that fetches a transcript, runs a configurable Gemini prompt, generates
+                    a 3072-dimension embedding, and writes one document to MongoDB. The dashboard reads those documents back
+                    as browsable <strong class="text-white">Stacks</strong>, powers semantic <strong class="text-white">Intel Chat</strong>,
+                    and renders relationship graphs.
+                </p>
+                <p class="mb-4">
+                    Beyond video, the same machinery is generalised: define a prompt, attach a schedule, and Queuei runs it
+                    every morning and paints the result as its own dashboard tab. That is how the built-in
+                    <strong class="text-white">NASDAQ stock analysis</strong> and any custom <strong class="text-white">Dashboard Feed</strong> work.
+                </p>
+                <div class="grid sm:grid-cols-3 gap-3 mt-6">
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <i class="fa-solid fa-database text-indigo-400 mb-2"></i>
+                        <p class="text-white text-sm font-bold mb-1">Dual database</p>
+                        <p class="text-slate-500 text-xs">Postgres for config &amp; auth, MongoDB for content &amp; vectors.</p>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <i class="fa-solid fa-robot text-emerald-400 mb-2"></i>
+                        <p class="text-white text-sm font-bold mb-1">LLM-native</p>
+                        <p class="text-slate-500 text-xs">Gemini for summarisation, embeddings, and transcript fallback.</p>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <i class="fa-solid fa-repeat text-amber-400 mb-2"></i>
+                        <p class="text-white text-sm font-bold mb-1">Schedule anything</p>
+                        <p class="text-slate-500 text-xs">Cron-driven pipelines &amp; feeds, editable from the UI.</p>
+                    </div>
+                </div>
+            </section>
+
+            {# ─────────────────────────── ARCHITECTURE ─────────────────────────── #}
+            <section id="architecture" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-diagram-project" title="Architecture" %}
+                <p class="mb-4">Two Django apps sit on top of two databases.</p>
+
+                <h3 class="text-white font-bold text-base mt-6 mb-2">Two apps</h3>
+                <ul class="list-disc list-inside space-y-1.5 text-sm mb-5 marker:text-indigo-500">
+                    <li><code class="text-indigo-300">records</code> — the user-facing frontend: auth, dashboard, Intel Chat, Nexus graph, Command Center, Settings, Cron manager, and this documentation portal.</li>
+                    <li><code class="text-indigo-300">tasks</code> — the ingestion &amp; scheduling backend: the YouTube pipeline, stock &amp; feed pipelines, the APScheduler runtime, and utility endpoints.</li>
+                </ul>
+
+                <h3 class="text-white font-bold text-base mt-6 mb-2">Two databases</h3>
+                <div class="overflow-x-auto rounded-xl border border-slate-800 mb-5">
+                    <table class="w-full text-sm prose-table">
+                        <thead class="bg-slate-900 text-slate-400 text-[11px] uppercase tracking-wider">
+                            <tr><th class="px-4 py-2.5">Store</th><th class="px-4 py-2.5">Access</th><th class="px-4 py-2.5">Holds</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800">
+                            <tr class="bg-slate-900/40">
+                                <td class="px-4 py-3 font-mono text-indigo-300">PostgreSQL (Neon)</td>
+                                <td class="px-4 py-3 text-slate-400">Django ORM</td>
+                                <td class="px-4 py-3 text-slate-400">Users &amp; groups, <code>TaskConfiguration</code>, <code>GlobalSetting</code>, <code>CronJob</code>, <code>DashboardFeed</code>, <code>TranscriptCache</code>.</td>
+                            </tr>
+                            <tr class="bg-slate-900/40">
+                                <td class="px-4 py-3 font-mono text-emerald-300">MongoDB (Atlas)</td>
+                                <td class="px-4 py-3 text-slate-400">pymongo (no ORM)</td>
+                                <td class="px-4 py-3 text-slate-400">All content records, transcripts, LLM outputs, entity annotations, and <code>embedding</code> vectors for search.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-sm text-slate-400">
+                    MongoDB connections are raw pymongo. <code class="text-indigo-300">get_db_collection()</code> in
+                    <code>records/views.py</code> opens a fresh connection per request; the pipeline shares a module-level
+                    client from <code>tasks/config.py</code>. There is deliberately no ORM over Mongo.
+                </p>
+            </section>
+
+            {# ─────────────────────────── DATA FLOW ─────────────────────────── #}
+            <section id="dataflow" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-arrows-turn-right" title="The Pipeline" %}
+                <p class="mb-5">Every video runs through <code class="text-indigo-300">YouTubeLLMPipeline</code> (<code>tasks/script_custom/youtube_llm_pipeline.py</code>). One document out per video in.</p>
+                <ol class="space-y-3 mb-6">
+                    {% include "partials/doc_step.html" with n="1" title="Discover" body="yt-dlp lists recent videos from every playlist in YOUTUBE_PLAYLIST_IDS, up to PLAYLIST_FETCH_LIMIT each. Already-processed IDs are skipped." %}
+                    {% include "partials/doc_step.html" with n="2" title="Transcript" body="Tries the local cache, then the source chain (see Transcript Sources). Successful pulls are written to TranscriptCache so retries never re-fetch." %}
+                    {% include "partials/doc_step.html" with n="3" title="LLM action" body="The task's prompt_template is formatted with {transcript} and sent to Gemini. The response is the intelligence body." %}
+                    {% include "partials/doc_step.html" with n="4" title="Embed" body="The LLM output is embedded with gemini-embedding-001 into a 3072-dim vector." %}
+                    {% include "partials/doc_step.html" with n="5" title="Persist" body="A document — metadata + LLM result + embedding + any EXTRA_DOCUMENT_ARGS — is inserted into the task's target collection in MongoDB." %}
+                </ol>
+                <p class="text-sm text-slate-400">
+                    Concurrency is bounded by <code>EXECUTOR_WORKERS</code> with an <code>INBETWEEN_TASK_SLEEP</code> pause
+                    between batches — the throttle that keeps Gemini rate limits happy. Trigger a run with
+                    <code class="text-indigo-300">POST /tasks/queuei/&lt;task_key&gt;/</code>.
+                </p>
+            </section>
+
+            {# ─────────────────────────── TRANSCRIPTS ─────────────────────────── #}
+            <section id="transcripts" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-closed-captioning" title="Transcript Sources" %}
+                <p class="mb-5">Transcripts are fetched through a fallback chain — the first source that returns text wins, and the result is cached.</p>
+                <div class="space-y-2.5">
+                    {% include "partials/doc_source.html" with n="1" name="youtube_transcript_api" note="Fast and free. Blocked on datacenter IPs (Render, cloud hosts) — often fails in production." tone="slate" %}
+                    {% include "partials/doc_source.html" with n="2" name="Gemini (server-side fetch)" note="Gemini reads the YouTube URL from Google's own infrastructure, bypassing datacenter-IP blocks. The reliable cloud path. Public videos only." tone="emerald" %}
+                    {% include "partials/doc_source.html" with n="3" name="RapidAPI" note="Third-party transcript API. Paid, quota-limited." tone="slate" %}
+                    {% include "partials/doc_source.html" with n="4" name="Supadata" note="Second paid fallback." tone="slate" %}
+                </div>
+                <div class="mt-5 flex items-start gap-3 bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
+                    <i class="fa-solid fa-triangle-exclamation text-amber-400 mt-0.5"></i>
+                    <p class="text-sm text-amber-200/80">On cloud hosts the library step almost always fails; Gemini is the workhorse. Because video ingestion is token-heavy, large backfills can hit Gemini rate limits — throttle via <code>EXECUTOR_WORKERS</code> / <code>INBETWEEN_TASK_SLEEP</code>.</p>
+                </div>
+            </section>
+
+            {# ─────────────────────────── DASHBOARD ─────────────────────────── #}
+            <section id="features" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-table-cells-large" title="Dashboard Features" %}
+                <div class="grid sm:grid-cols-2 gap-3">
+                    {% include "partials/doc_feature.html" with icon="fa-layer-group" color="indigo" title="Stacks" body="Video intelligence grouped by playlist. Drill into a stack to browse per-video reports; transcripts are excluded from the list query for speed." %}
+                    {% include "partials/doc_feature.html" with icon="fa-chart-line" color="emerald" title="Stocks" body="NASDAQ-100 analysis refreshed every morning by a scheduled pipeline, stored in the stock_results collection and rendered as its own tab." %}
+                    {% include "partials/doc_feature.html" with icon="fa-newspaper" color="amber" title="Feeds" body="Generic scheduled-LLM tabs. Each run is appended as a new sub-tab (history), so a feed reads like a Stack of daily editions." %}
+                    {% include "partials/doc_feature.html" with icon="fa-comment-dots" color="sky" title="Intel Chat" body="RAG over your corpus: your question is embedded, a $vectorSearch on vector_index pulls the top-5 documents, and Gemini answers grounded in them." %}
+                    {% include "partials/doc_feature.html" with icon="fa-circle-nodes" color="fuchsia" title="Nexus Graph" body="A force-directed graph built from entity annotations on documents — people, orgs, and tickers linked across the corpus." %}
+                    {% include "partials/doc_feature.html" with icon="fa-terminal" color="rose" title="Command Center" body="Supervisor CRUD over TaskConfiguration — create tasks and edit their prompts and target collections inline." %}
+                </div>
+            </section>
+
+            {# ─────────────────────────── CONFIGURATION ─────────────────────────── #}
+            <section id="config" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-sliders" title="Configuration Layers" %}
+                <p class="mb-5">Runtime behaviour lives in PostgreSQL, editable from the UI — no redeploy to change how the pipeline runs.</p>
+                <div class="space-y-3">
+                    {% include "partials/doc_layer.html" with title="TaskConfiguration" where="Command Center (/command-center/)" body="Defines <em>what</em> a task does: its prompt_template (with {transcript}) and target_collection. Adding a row makes /tasks/queuei/&lt;task_key&gt;/ live immediately." %}
+                    {% include "partials/doc_layer.html" with title="GlobalSetting" where="Settings (/settings/, superuser)" body="Defines <em>how</em> the pipeline runs: playlist IDs, fetch limit, AI model, workers, sleep, extra document fields. Seeded from env vars on first visit, then the DB value wins. Read fresh on every run." %}
+                    {% include "partials/doc_layer.html" with title="CronJob" where="Cron manager (/cron/, superuser)" body="Schedules a pipeline or an internal endpoint on a 5-part cron expression. APScheduler hot-reloads on change." %}
+                    {% include "partials/doc_layer.html" with title="DashboardFeed" where="Command Center / admin" body="A scheduled-LLM feed: a prompt, a render type (markdown or table), an optional model, and an icon. A CronJob hitting /tasks/feed/&lt;key&gt;/ refreshes it." %}
+                </div>
+            </section>
+
+            {# ─────────────────────────── SCHEDULING ─────────────────────────── #}
+            <section id="scheduling" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-clock" title="Scheduling" %}
+                <p class="mb-4">
+                    A single <code class="text-indigo-300">APScheduler BackgroundScheduler</code> (UTC) reads <code>CronJob</code> rows and fires them.
+                    Two job types:
+                </p>
+                <ul class="list-disc list-inside space-y-1.5 text-sm mb-5 marker:text-indigo-500">
+                    <li><code class="text-indigo-300">pipeline</code> — invokes a Python pipeline class directly (e.g. the YouTube or stock pipeline).</li>
+                    <li><code class="text-indigo-300">endpoint</code> — dispatches an internal request to a relative URL with the task secret header (used by feeds).</li>
+                </ul>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-sm">
+                    <p class="text-slate-400 mb-2"><i class="fa-solid fa-lightbulb text-amber-400 mr-1.5"></i>Timezone note</p>
+                    <p class="text-slate-400">The scheduler runs in UTC. <strong class="text-white">9:00 AM IST</strong> is
+                    <code class="text-indigo-300">30 3 * * *</code>. Convert your local time to UTC before entering a cron expression.</p>
+                </div>
+            </section>
+
+            {# ─────────────────────────── DATA MODELS ─────────────────────────── #}
+            <section id="models" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-cube" title="Data Models (Postgres)" %}
+                <div class="space-y-4">
+                    {% include "partials/doc_model.html" with name="TaskConfiguration" fields="task_key · display_name · prompt_template · target_collection · is_active" %}
+                    {% include "partials/doc_model.html" with name="GlobalSetting" fields="key · value · description" %}
+                    {% include "partials/doc_model.html" with name="CronJob" fields="name · job_type · task_key · endpoint_url · cron_expression · is_active · last_run_at · created_at" %}
+                    {% include "partials/doc_model.html" with name="DashboardFeed" fields="key · title · icon · prompt · render_type · ai_model · is_active · created_at" %}
+                    {% include "partials/doc_model.html" with name="TranscriptCache" fields="video_id · transcript · cached_at" %}
+                </div>
+                <p class="text-sm text-slate-500 mt-4">MongoDB documents are schemaless; a record typically carries video metadata, the LLM result, entity annotations, and a 3072-dim <code>embedding</code>.</p>
+            </section>
+
+            {# ─────────────────────────── API ─────────────────────────── #}
+            <section id="api" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-plug" title="Endpoint Reference" %}
+                <div class="overflow-x-auto rounded-xl border border-slate-800">
+                    <table class="w-full text-[13px] prose-table">
+                        <thead class="bg-slate-900 text-slate-400 text-[11px] uppercase tracking-wider">
+                            <tr><th class="px-4 py-2.5">Method</th><th class="px-4 py-2.5">Path</th><th class="px-4 py-2.5">Purpose</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800 font-mono text-slate-300">
+                            {% include "partials/doc_route.html" with m="GET" path="/" desc="Dashboard (Analyst/Supervisor)" %}
+                            {% include "partials/doc_route.html" with m="GET" path="/intel-chat/" desc="RAG chat over the corpus" %}
+                            {% include "partials/doc_route.html" with m="GET" path="/nexus-data/" desc="Entity force-graph JSON" %}
+                            {% include "partials/doc_route.html" with m="GET" path="/stocks-data/" desc="Latest stock analysis JSON" %}
+                            {% include "partials/doc_route.html" with m="ALL" path="/command-center/" desc="TaskConfiguration CRUD (Supervisor)" %}
+                            {% include "partials/doc_route.html" with m="ALL" path="/settings/" desc="GlobalSetting editor (superuser)" %}
+                            {% include "partials/doc_route.html" with m="ALL" path="/cron/" desc="CronJob manager (superuser)" %}
+                            {% include "partials/doc_route.html" with m="GET" path="/doc/" desc="This documentation portal" %}
+                            {% include "partials/doc_route.html" with m="POST" path="/tasks/queuei/&lt;task_key&gt;/" desc="Run the YouTube pipeline for a task" %}
+                            {% include "partials/doc_route.html" with m="POST" path="/tasks/feed/&lt;feed_key&gt;/" desc="Refresh a Dashboard Feed" %}
+                            {% include "partials/doc_route.html" with m="POST" path="/tasks/stocks_refresh/" desc="Refresh NASDAQ analysis" %}
+                            {% include "partials/doc_route.html" with m="POST" path="/tasks/alert/" desc="Send a Slack webhook alert" %}
+                            {% include "partials/doc_route.html" with m="POST" path="/tasks/backfill_entities/" desc="Backfill entity annotations" %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            {# ─────────────────────────── ENV ─────────────────────────── #}
+            <section id="env" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-key" title="Environment Variables" %}
+                <p class="mb-4 text-sm text-slate-400">Secrets and infrastructure config live in <code>.env</code>, never in the database.</p>
+                <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 font-mono text-[13px]">
+                    {% include "partials/doc_env.html" with k="DATABASE_URL" v="Neon PostgreSQL connection string" %}
+                    {% include "partials/doc_env.html" with k="DB_USER / DB_PASSWORD / DB_URL" v="MongoDB Atlas credentials" %}
+                    {% include "partials/doc_env.html" with k="MONGO_DB_NAME" v="Mongo database (default queuei)" %}
+                    {% include "partials/doc_env.html" with k="GOOGLE_API_KEY / GEN_AI_API_KEY" v="Gemini API key" %}
+                    {% include "partials/doc_env.html" with k="SLACK_WEBHOOK_URL" v="Incoming webhook for alerts" %}
+                    {% include "partials/doc_env.html" with k="RAPID_API_KEY / _HOST / _URL" v="RapidAPI transcript fallback" %}
+                    {% include "partials/doc_env.html" with k="SUPADATA_API_KEY" v="Supadata transcript fallback" %}
+                    {% include "partials/doc_env.html" with k="DJANGO_SECRET_KEY" v="Django cryptographic secret" %}
+                    {% include "partials/doc_env.html" with k="ALLOWED_HOSTS" v="Comma-separated allowed hostnames" %}
+                </div>
+                <p class="text-xs text-slate-500 mt-4">Pipeline-behaviour vars (playlist IDs, fetch limit, AI model, workers, sleep, extra args) are only <em>seeds</em> — once the Settings page runs, the DB value takes over.</p>
+            </section>
+
+            {# ─────────────────────────── ACCESS CONTROL ─────────────────────────── #}
+            <section id="access" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-user-shield" title="Access Control" %}
+                <p class="mb-4 text-sm">New signups are <code class="text-indigo-300">is_active=False</code> until a supervisor approves them. Authorisation is by Django group plus the superuser flag.</p>
+                <div class="overflow-x-auto rounded-xl border border-slate-800">
+                    <table class="w-full text-sm prose-table">
+                        <thead class="bg-slate-900 text-slate-400 text-[11px] uppercase tracking-wider">
+                            <tr><th class="px-4 py-2.5">Area</th><th class="px-4 py-2.5">Who</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800">
+                            <tr class="bg-slate-900/40"><td class="px-4 py-3">Dashboard, Chat, Docs</td><td class="px-4 py-3 text-slate-400">Analyst or Supervisor</td></tr>
+                            <tr class="bg-slate-900/40"><td class="px-4 py-3">Command Center</td><td class="px-4 py-3 text-slate-400">Supervisor or superuser</td></tr>
+                            <tr class="bg-slate-900/40"><td class="px-4 py-3">Settings, Cron</td><td class="px-4 py-3 text-slate-400">Superuser only</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-3">Unauthorised authenticated users see <code>access_denied.html</code> rather than a redirect.</p>
+            </section>
+
+            {# ─────────────────────────── DEPLOY ─────────────────────────── #}
+            <section id="deploy" class="doc-section mb-14">
+                {% include "partials/doc_heading.html" with icon="fa-rocket" title="Deployment" %}
+                <p class="mb-4 text-sm">Local development:</p>
+                <pre class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-[13px] font-mono text-slate-300 overflow-x-auto mb-5"><span class="text-slate-600"># run the app</span>
+python manage.py migrate
+python manage.py runserver
+
+<span class="text-slate-600"># after model changes</span>
+python manage.py makemigrations
+
+<span class="text-slate-600"># build & run the container (connects to production DBs)</span>
+./build.sh</pre>
+                <p class="text-sm text-slate-400">The container entrypoint runs <code>migrate</code> then gunicorn on port 8000 with <code>--env-file .env</code>. The scheduler boots inside the web process and hot-loads cron jobs from the DB.</p>
+            </section>
+
+            <footer class="border-t border-slate-800 pt-6 mt-16 text-xs text-slate-600 font-mono flex flex-wrap items-center justify-between gap-2">
+                <span>Queuei — self-hosted intelligence terminal.</span>
+                <a href="#overview" class="hover:text-indigo-400"><i class="fa-solid fa-arrow-up mr-1"></i>Back to top</a>
+            </footer>
+
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('docsApp', () => ({
+                sidebarOpen: false,
+                active: 'overview',
+                query: '',
+                nav: [
+                    { title: 'Introduction', items: [
+                        { id: 'overview',     label: 'Overview',            icon: 'fa-compass' },
+                        { id: 'architecture', label: 'Architecture',        icon: 'fa-diagram-project' },
+                    ]},
+                    { title: 'How it works', items: [
+                        { id: 'dataflow',    label: 'The Pipeline',        icon: 'fa-arrows-turn-right' },
+                        { id: 'transcripts', label: 'Transcript Sources',  icon: 'fa-closed-captioning' },
+                        { id: 'features',    label: 'Dashboard Features',   icon: 'fa-table-cells-large' },
+                    ]},
+                    { title: 'Operate', items: [
+                        { id: 'config',     label: 'Configuration',        icon: 'fa-sliders' },
+                        { id: 'scheduling', label: 'Scheduling',           icon: 'fa-clock' },
+                        { id: 'deploy',     label: 'Deployment',           icon: 'fa-rocket' },
+                    ]},
+                    { title: 'Reference', items: [
+                        { id: 'models', label: 'Data Models',          icon: 'fa-cube' },
+                        { id: 'api',    label: 'Endpoints',            icon: 'fa-plug' },
+                        { id: 'env',    label: 'Environment',          icon: 'fa-key' },
+                        { id: 'access', label: 'Access Control',       icon: 'fa-user-shield' },
+                    ]},
+                ],
+
+                init() {
+                    // scroll-spy
+                    const opts = { rootMargin: '-15% 0px -70% 0px', threshold: 0 };
+                    const obs = new IntersectionObserver((entries) => {
+                        entries.forEach(e => { if (e.isIntersecting) this.active = e.target.id; });
+                    }, opts);
+                    this.$nextTick(() => {
+                        document.querySelectorAll('section.doc-section').forEach(s => obs.observe(s));
+                    });
+                },
+
+                get filteredNav() {
+                    const q = this.query.trim().toLowerCase();
+                    if (!q) return this.nav;
+                    return this.nav
+                        .map(g => ({ ...g, items: g.items.filter(i => i.label.toLowerCase().includes(q)) }))
+                        .filter(g => g.items.length);
+                },
+            }));
+        });
+    </script>
+</body>
+</html>

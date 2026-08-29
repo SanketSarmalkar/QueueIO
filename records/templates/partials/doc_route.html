@@ -1,0 +1,7 @@
+<tr class="hover:bg-slate-900/40">
+    <td class="px-4 py-2.5">
+        <span class="text-[10px] font-black px-1.5 py-0.5 rounded {% if m == 'POST' %}bg-emerald-500/15 text-emerald-400{% elif m == 'GET' %}bg-sky-500/15 text-sky-400{% else %}bg-slate-700 text-slate-400{% endif %}">{{ m }}</span>
+    </td>
+    <td class="px-4 py-2.5 text-indigo-300">{{ path|safe }}</td>
+    <td class="px-4 py-2.5 text-slate-400 font-sans text-[13px]">{{ desc }}</td>
+</tr>

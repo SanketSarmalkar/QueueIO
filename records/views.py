@@ -728,6 +728,18 @@ def get_nexus_graph(request):
     return JsonResponse({"nodes": nodes, "links": links})
 
 
+def docs_view(request):
+    """Public project documentation portal (OpenMetadata-style).
+
+    Intentionally UNAUTHENTICATED — this is meant to be hosted openly. It contains
+    only static, technical reference material (architecture, the pipeline, data
+    models, endpoint reference, environment-variable *names*, deployment). It reads
+    NOTHING from the database and exposes no instance configuration, secrets, or
+    credential values.
+    """
+    return render(request, 'docs.html')
+
+
 @login_required
 @user_passes_test(lambda u: u.is_superuser)
 def settings_view(request):
