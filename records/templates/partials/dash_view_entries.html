@@ -1,5 +1,5 @@
 <template x-if="viewMode === 'entries' && activeItem">
-    <div class="pb-14 md:pb-0">
+    <div class="pb-24 md:pb-0">
         <!-- Reading progress bar -->
         <div class="sticky top-0 z-10 h-[3px] bg-slate-200 dark:bg-slate-800" role="progressbar" :aria-valuenow="readingProgress" aria-valuemin="0" aria-valuemax="100" aria-label="Reading progress">
             <div class="h-full bg-indigo-500 transition-[width] duration-150 ease-linear"
@@ -153,7 +153,7 @@
 </template>
 
 <template x-if="viewMode === 'entries' && !activeItem">
-    <div class="h-full flex flex-col items-center justify-center gap-5 pb-14 md:pb-0">
+    <div class="h-full flex flex-col items-center justify-center gap-5 pb-24 md:pb-0">
         <div class="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800/60 flex items-center justify-center" aria-hidden="true">
             <i class="fa-solid fa-file-lines text-2xl text-slate-300 dark:text-slate-700" aria-hidden="true"></i>
         </div>

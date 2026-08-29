@@ -698,7 +698,7 @@
 <body
     x-cloak
     :class="{ 'alpine-ready': true, 'bg-slate-50 dark:bg-slate-950': true }"
-    class="h-screen overflow-hidden flex flex-col font-sans transition-colors duration-300"
+    class="h-screen [height:100dvh] overflow-hidden flex flex-col font-sans transition-colors duration-300"
 >
     {{ items_raw|json_script:"items-data" }}
     {{ tasks_json|json_script:"tasks-data" }}
@@ -845,7 +845,7 @@
     </div>
 
     <!-- Mobile bottom navigation -->
-    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 flex items-stretch" aria-label="Mobile navigation">
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 flex items-stretch pb-[env(safe-area-inset-bottom)]" aria-label="Mobile navigation">
         <button @click="viewMode = 'stacks'; selectedPlaylistId = null"
                 :class="viewMode === 'stacks' || viewMode === 'entries' ? 'text-indigo-400' : 'text-slate-600'"
                 class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
