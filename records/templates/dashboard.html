@@ -3,22 +3,27 @@
 <html lang="en" x-data="terminal" :class="{ 'dark': darkMode }">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="Queuei Intelligence Terminal — browse reports, explore entity graphs, and query your archive with AI.">
+    <meta property="og:title" content="Queuei Intelligence Terminal">
     <title>Queuei Intelligence Terminal</title>
     <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
-    
+    <link rel="apple-touch-icon" href="{% static 'favicon.png' %}">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
+        tailwind.config = { darkMode: 'class' }
     </script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://unpkg.com/force-graph"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/typography@0.5.10/dist/typography.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+          integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer">
 
     <script>
         let nexusGraphInstance = null;
@@ -36,9 +41,9 @@
                 chatMessages: [],
                 chatHistory: [],
                 showNewTaskModal: false,
-                newTask: { 
-                    task_key: '', display_name: '', prompt_template: '', 
-                    target_collection: 'mass_records', is_active: true 
+                newTask: {
+                    task_key: '', display_name: '', prompt_template: '',
+                    target_collection: 'mass_records', is_active: true
                 },
                 items: [],
                 tasks: [],
@@ -47,6 +52,9 @@
                 hasMore: false,
                 nextOffset: 50,
                 loadingMore: false,
+                stackLoading: false,
+                playlistHasMore: false,
+                playlistNextOffset: 50,
                 searchResults: [],
                 searchLoading: false,
                 isSearchMode: false,
@@ -59,6 +67,14 @@
                 insightsLoading: false,
                 usageData: null,
                 usageLoading: false,
+                stocksData: null,
+                stocksLoading: false,
+                stocksSort: 'overall',
+                stocksSearch: '',
+                stockDetail: null,
+                feeds: [],
+                activeFeedKey: null,
+                activeRunIndex: 0,
                 hoverNode: null,
                 nexusLoading: false,
                 nexusMouseX: 0,
@@ -77,10 +93,19 @@
                         const itemsData = document.getElementById('items-data');
                         const tasksData = document.getElementById('tasks-data');
                         const stacksData = document.getElementById('stacks-data');
+                        const stocksEl = document.getElementById('stocks-data');
 
                         this.items = itemsData ? JSON.parse(itemsData.textContent) : [];
                         this.tasks = tasksData ? JSON.parse(tasksData.textContent) : [];
                         this.stacks = stacksData ? JSON.parse(stacksData.textContent) : [];
+                        // Stock snapshot is injected server-side (like stacks); a null/empty
+                        // object means no snapshot has been generated yet.
+                        const stocksParsed = stocksEl ? JSON.parse(stocksEl.textContent) : null;
+                        this.stocksData = (stocksParsed && Object.keys(stocksParsed).length) ? stocksParsed : null;
+                        // Generic dashboard feeds — each becomes a dynamic tab.
+                        const feedsEl = document.getElementById('feeds-data');
+                        this.feeds = feedsEl ? JSON.parse(feedsEl.textContent) : [];
+                        this.activeFeedKey = null; // Feeds opens to the card grid
                         this.totalCount = {{ total_count }};
                         this.hasMore = {{ has_more }};
                         this.nextOffset = {{ next_offset }};
@@ -90,13 +115,14 @@
                             const sentinel = document.getElementById('scroll-sentinel');
                             if (container && sentinel) {
                                 new IntersectionObserver((entries) => {
-                                    if (entries[0].isIntersecting && this.hasMore && !this.loadingMore) {
+                                    const canLoad = this.selectedPlaylistId ? this.playlistHasMore : this.hasMore;
+                                    if (entries[0].isIntersecting && canLoad && !this.loadingMore) {
                                         this.loadMoreItems();
                                     }
                                 }, { root: container, rootMargin: '100px' }).observe(sentinel);
                             }
                         });
-                        
+
                         this.$watch('searchQuery', (val) => {
                             clearTimeout(this._searchTimer);
                             if (val.length > 2) {
@@ -123,7 +149,7 @@
                                 NEXUS_ENGINE.zoom(3.5, 800);
                             }
                         });
-                
+
                         fetch('/bookmarks/')
                             .then(r => r.json())
                             .then(d => {
@@ -134,7 +160,7 @@
 
                         console.log("✅ System Initialized and Watchers Active.");
                     } catch (e) {
-                        print("❌ Initialization Error:", e);
+                        console.error("❌ Initialization Error:", e);
                     }
                 },
 
@@ -143,7 +169,6 @@
                     this.viewMode = 'entries';
                     if (window.innerWidth < 768) this.sidebarOpen = false;
 
-                    // Fetch related reports in parallel — reset immediately so old results don't flash
                     this.relatedReports = [];
                     this.relatedLoading = true;
                     fetch(`/related/${id}/`)
@@ -152,7 +177,6 @@
                         .catch(() => {})
                         .finally(() => { this.relatedLoading = false; });
 
-                    // If item isn't in the loaded set (e.g. opened from Nexus map), add a stub
                     if (!this.items.find(i => i.id === id)) {
                         this.items.push({
                             id, loading: true, title: '...', category: '',
@@ -194,27 +218,47 @@
                     }
                 },
 
-                toggleDark() { 
+                toggleDark() {
                     this.darkMode = !this.darkMode;
                     localStorage.setItem('darkMode', this.darkMode);
                 },
-    
+
                 async loadMoreItems() {
-                    if (!this.hasMore || this.loadingMore) return;
-                    this.loadingMore = true;
-                    try {
-                        const resp = await fetch(`/records/?offset=${this.nextOffset}`);
-                        const data = await resp.json();
-                        this.items.push(...data.items);
-                        this.hasMore = data.has_more;
-                        this.nextOffset = data.next_offset;
-                    } catch (e) {
-                        console.error('Failed to load more records', e);
-                    } finally {
-                        this.loadingMore = false;
+                    if (this.loadingMore) return;
+                    const pid = this.selectedPlaylistId;
+                    if (pid) {
+                        if (!this.playlistHasMore) return;
+                        this.loadingMore = true;
+                        try {
+                            const resp = await fetch(`/records/?offset=${this.playlistNextOffset}&playlist_id=${encodeURIComponent(pid)}`);
+                            const data = await resp.json();
+                            const existingIds = new Set(this.items.map(i => i.id));
+                            const newItems = (data.items || []).filter(i => !existingIds.has(i.id));
+                            this.items.push(...newItems);
+                            this.playlistHasMore = data.has_more;
+                            this.playlistNextOffset = data.next_offset;
+                        } catch (e) {
+                            console.error('Failed to load more records', e);
+                        } finally {
+                            this.loadingMore = false;
+                        }
+                    } else {
+                        if (!this.hasMore) return;
+                        this.loadingMore = true;
+                        try {
+                            const resp = await fetch(`/records/?offset=${this.nextOffset}`);
+                            const data = await resp.json();
+                            this.items.push(...data.items);
+                            this.hasMore = data.has_more;
+                            this.nextOffset = data.next_offset;
+                        } catch (e) {
+                            console.error('Failed to load more records', e);
+                        } finally {
+                            this.loadingMore = false;
+                        }
                     }
                 },
-    
+
                 async toggleBookmark(id, title) {
                     const resp = await fetch('/bookmark/', {
                         method: 'POST',
@@ -251,37 +295,50 @@
                         return matchesSearch && matchesPlaylist;
                     });
                 },
-    
-                get activeItem() { 
-                    return this.items.find(i => i.id === this.selectedId) || null; 
+
+                get activeItem() {
+                    return this.items.find(i => i.id === this.selectedId) || null;
                 },
-    
+
                 async openStack(id) {
                     this.selectedPlaylistId = id;
                     this.viewMode = 'entries';
-                    const first = this.items.find(i => (i.playlist_id || 'unassigned') === id);
-                    if (first) {
-                        this.selectItem(first.id);
+                    if (id === 'unassigned') {
+                        const first = this.items.find(i => (i.playlist_id || 'unassigned') === id);
+                        if (first) this.selectItem(first.id);
                         return;
                     }
-                    // No items for this playlist loaded yet — fetch the first page
-                    if (id === 'unassigned') return;
+                    this.stackLoading = true;
                     try {
                         const resp = await fetch(`/records/?offset=0&playlist_id=${encodeURIComponent(id)}`);
+                        if (!resp.ok) {
+                            console.error(`[openStack] fetch failed: HTTP ${resp.status}`);
+                            return;
+                        }
                         const data = await resp.json();
+                        console.log(`[openStack] playlist=${id} | backend total=${data.total} | returned=${(data.items||[]).length} | has_more=${data.has_more}`);
                         const existingIds = new Set(this.items.map(i => i.id));
                         const newItems = (data.items || []).filter(i => !existingIds.has(i.id));
+                        console.log(`[openStack] new (not pre-loaded)=${newItems.length} | pre-loaded matching=${this.items.filter(i => i.playlist_id === id).length}`);
                         this.items.push(...newItems);
-                        const loaded = this.items.find(i => (i.playlist_id || 'unassigned') === id);
+                        this.playlistHasMore = data.has_more;
+                        this.playlistNextOffset = data.next_offset;
+                        const allMatchingPids = this.items.filter(i => (i.playlist_id || 'unassigned') === id);
+                        console.log(`[openStack] filterable after push=${allMatchingPids.length}`);
+                        const loaded = allMatchingPids[0];
                         if (loaded) this.selectItem(loaded.id);
-                    } catch(e) {}
+                    } catch(e) {
+                        console.error('[openStack] error:', e);
+                    } finally { this.stackLoading = false; }
                 },
-    
+
                 goBackToStacks() {
                     this.viewMode = 'stacks';
                     this.selectedPlaylistId = null;
+                    this.playlistHasMore = false;
+                    this.playlistNextOffset = 50;
                 },
-    
+
                 async saveTask(task, isNew = false) {
                     try {
                         const response = await fetch('/command-center/', {
@@ -334,7 +391,6 @@
                             sources: data.sources || []
                         });
 
-                        // Store plain-text turns for history (strip HTML tags for the context)
                         this.chatHistory.push({ role: 'user', text: q });
                         this.chatHistory.push({ role: 'ai', text: rawAnswer });
                         if (this.chatHistory.length > 12) this.chatHistory = this.chatHistory.slice(-12);
@@ -342,7 +398,7 @@
                         this.chatMessages.push({ role: 'ai', text: 'SYSTEM ERROR: Intelligence uplink failed.' });
                     } finally {
                         this.chatLoading = false;
-                        this.$nextTick(() => { 
+                        this.$nextTick(() => {
                             const el = document.getElementById('chat-scroll');
                             if (el) el.scrollTop = el.scrollHeight;
                         });
@@ -359,7 +415,7 @@
                         this.renderNexus();
                     }
                 },
-    
+
                 async renderNexus() {
                     if (NEXUS_ENGINE) {
                         console.log("⚡ Nexus Engine active. Resuming session.");
@@ -519,6 +575,61 @@
                     }
                 },
 
+                async loadStocks() {
+                    // Only fetch once; the daily snapshot doesn't change intraday.
+                    if (this.stocksData || this.stocksLoading) return;
+                    this.stocksLoading = true;
+                    try {
+                        const r = await fetch('/stocks-data/');
+                        this.stocksData = await r.json();
+                    } catch(e) {
+                        this.stocksData = null;
+                    } finally {
+                        this.stocksLoading = false;
+                    }
+                },
+
+                stocksRows() {
+                    const d = this.stocksData;
+                    if (!d || !d.rows) return [];
+                    let rows = d.rows;
+                    const q = (this.stocksSearch || '').trim().toLowerCase();
+                    if (q) {
+                        rows = rows.filter(r =>
+                            (r.symbol || '').toLowerCase().includes(q) ||
+                            (r.name || '').toLowerCase().includes(q));
+                    }
+                    const key = this.stocksSort;
+                    return [...rows].sort((a, b) => {
+                        const av = a[key], bv = b[key];
+                        if (av == null && bv == null) return 0;
+                        if (av == null) return 1;
+                        if (bv == null) return -1;
+                        return bv - av; // high-to-low for all numeric score/return keys
+                    });
+                },
+
+                scoreColor(v) {
+                    if (v == null) return 'text-slate-400';
+                    if (v >= 65) return 'text-emerald-500 font-bold';
+                    if (v >= 45) return 'text-amber-500 font-semibold';
+                    return 'text-rose-500 font-semibold';
+                },
+                signalClass(sig) {
+                    if (sig === 'Bullish') return 'bg-emerald-500/15 text-emerald-500';
+                    if (sig === 'Neutral') return 'bg-amber-500/15 text-amber-500';
+                    if (sig === 'Bearish') return 'bg-rose-500/15 text-rose-500';
+                    return 'bg-slate-500/10 text-slate-400';
+                },
+                fmtNum(v, digits = 2) {
+                    if (v == null || isNaN(v)) return '—';
+                    return Number(v).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+                },
+                fmtPct(v) {
+                    if (v == null || isNaN(v)) return '—';
+                    return (v >= 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+                },
+
                 onMainScroll(event) {
                     if (this.viewMode !== 'entries') { this.readingProgress = 0; return; }
                     const el = event.target;
@@ -544,44 +655,69 @@
         .custom-scrollbar::-webkit-scrollbar { width: 5px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
         .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; }
-        
+
         .prose { max-width: none; }
         .prose h3 { margin-top: 1.5rem; font-weight: 800; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem; }
         .dark .prose h3 { border-color: #1e293b; color: #f8fafc; }
         .prose strong { color: #4f46e5; }
         .dark .prose strong { color: #818cf8; }
-        
+
+        /* Dark-mode prose palette. The standalone typography CSS ships no dark:
+           variant, so we drive the --tw-prose-* variables from the app's .dark
+           class (which every prose element reads via var()). */
+        .dark .prose {
+            --tw-prose-body: #cbd5e1;
+            --tw-prose-headings: #f8fafc;
+            --tw-prose-lead: #cbd5e1;
+            --tw-prose-links: #818cf8;
+            --tw-prose-bold: #818cf8;
+            --tw-prose-counters: #94a3b8;
+            --tw-prose-bullets: #475569;
+            --tw-prose-hr: #1e293b;
+            --tw-prose-quotes: #e2e8f0;
+            --tw-prose-quote-borders: #334155;
+            --tw-prose-captions: #94a3b8;
+            --tw-prose-code: #e2e8f0;
+            --tw-prose-pre-code: #e2e8f0;
+            --tw-prose-pre-bg: #0f172a;
+            --tw-prose-th-borders: #334155;
+            --tw-prose-td-borders: #1e293b;
+            color: #cbd5e1;
+        }
+        .dark .prose h1, .dark .prose h2, .dark .prose h4,
+        .dark .prose h5, .dark .prose h6 { color: #f8fafc; }
+        .dark .prose p, .dark .prose li, .dark .prose blockquote,
+        .dark .prose td, .dark .prose th { color: #cbd5e1; }
+
         [x-cloak] { display: none !important; }
-        .alpine-ready {
-            animation: fadeIn 0.4s ease-out;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
+        .alpine-ready { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 
-
-<body 
-    x-cloak 
-    :class="{ 'alpine-ready': true, 'bg-slate-50 dark:bg-slate-950': true }" 
-    class="h-screen overflow-hidden flex flex-col font-sans transition-colors duration-300"
+<body
+    x-cloak
+    :class="{ 'alpine-ready': true, 'bg-slate-50 dark:bg-slate-950': true }"
+    class="h-screen [height:100dvh] overflow-hidden flex flex-col font-sans transition-colors duration-300"
 >
     {{ items_raw|json_script:"items-data" }}
     {{ tasks_json|json_script:"tasks-data" }}
     {{ stacks_json|json_script:"stacks-data" }}
+    {{ stocks_json|json_script:"stocks-data" }}
+    {{ feeds_json|json_script:"feeds-data" }}
+
     <header class="h-14 bg-slate-900 text-white flex items-center px-4 md:px-6 justify-between z-50 border-b border-slate-800 shrink-0">
         <!-- Left: logo + sidebar toggle -->
         <div class="flex items-center gap-2">
             <button @click="sidebarOpen = !sidebarOpen"
                     class="p-2 -ml-1 text-slate-500 hover:text-white transition-colors"
-                    x-show="viewMode === 'entries'">
-                <i class="fa-solid fa-bars text-sm" :class="!sidebarOpen && 'opacity-40'"></i>
+                    x-show="viewMode === 'entries'"
+                    :aria-label="sidebarOpen ? 'Close sidebar' : 'Open sidebar'">
+                <i class="fa-solid fa-bars text-sm" :class="!sidebarOpen && 'opacity-40'" aria-hidden="true"></i>
             </button>
-            <div class="flex items-center gap-2.5 cursor-pointer" @click="goBackToStacks()">
-                <img src="{% static 'favicon.png' %}" alt="Logo"
-                     class="w-8 h-8 rounded-lg object-cover border border-slate-700/60">
+            <div class="flex items-center gap-2.5 cursor-pointer" @click="goBackToStacks()" role="link" aria-label="Queuei — go to stacks">
+                <img src="{% static 'favicon.png' %}" alt=""
+                     class="w-8 h-8 rounded-lg object-cover border border-slate-700/60" aria-hidden="true">
                 <span class="font-black tracking-tighter text-base uppercase hidden sm:block">
                     Queue <span class="text-indigo-400">IO</span>
                 </span>
@@ -589,45 +725,63 @@
         </div>
 
         <!-- Centre: primary nav -->
-        <nav class="hidden md:flex items-center gap-0.5 bg-slate-800/50 rounded-xl px-1 py-1">
+        <nav class="hidden md:flex items-center gap-0.5 bg-slate-800/50 rounded-xl px-1 py-1" aria-label="Main navigation">
             <button @click="viewMode = 'stacks'"
                     :class="viewMode === 'stacks' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
-                <i class="fa-solid fa-layer-group text-[9px]"></i> Stacks
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'stacks' ? 'page' : 'false'">
+                <i class="fa-solid fa-layer-group text-[9px]" aria-hidden="true"></i> Stacks
             </button>
             <button @click="viewMode = 'chat'"
                     :class="viewMode === 'chat' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
-                <i class="fa-solid fa-bolt-lightning text-[9px]"></i> Intel
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'chat' ? 'page' : 'false'">
+                <i class="fa-solid fa-bolt-lightning text-[9px]" aria-hidden="true"></i> Intel
             </button>
             <div class="flex items-center gap-1">
                 <button @click="viewMode = 'nexus'; initNexusGraph()"
                         :class="viewMode === 'nexus' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
-                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
-                    <i class="fa-solid fa-circle-nodes text-[9px]"></i> Nexus
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                        :aria-current="viewMode === 'nexus' ? 'page' : 'false'">
+                    <i class="fa-solid fa-circle-nodes text-[9px]" aria-hidden="true"></i> Nexus
                 </button>
                 <button x-show="viewMode === 'nexus'" x-transition
                         @click="NEXUS_ENGINE = null; renderNexus()"
                         class="p-1.5 text-slate-600 hover:text-indigo-400 transition-colors rounded-lg hover:bg-slate-700"
-                        title="Resync graph">
-                    <i class="fa-solid fa-rotate text-[9px]" :class="nexusLoading && 'animate-spin'"></i>
+                        aria-label="Resync graph">
+                    <i class="fa-solid fa-rotate text-[9px]" :class="nexusLoading && 'animate-spin'" aria-hidden="true"></i>
                 </button>
             </div>
             <button @click="viewMode = 'insights'; loadInsights()"
                     :class="viewMode === 'insights' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
-                <i class="fa-solid fa-chart-bar text-[9px]"></i> Insights
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'insights' ? 'page' : 'false'">
+                <i class="fa-solid fa-chart-bar text-[9px]" aria-hidden="true"></i> Insights
             </button>
             <button @click="viewMode = 'usage'; loadUsage()"
                     :class="viewMode === 'usage' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
-                <i class="fa-solid fa-gauge-high text-[9px]"></i> Usage
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'usage' ? 'page' : 'false'">
+                <i class="fa-solid fa-gauge-high text-[9px]" aria-hidden="true"></i> Usage
+            </button>
+            <button @click="viewMode = 'stocks_tab'; loadStocks()"
+                    :class="viewMode === 'stocks_tab' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'stocks_tab' ? 'page' : 'false'">
+                <i class="fa-solid fa-chart-line text-[9px]" aria-hidden="true"></i> Stocks
+            </button>
+            <button x-show="feeds.length" @click="viewMode = 'feeds'; activeFeedKey = null"
+                    :class="viewMode === 'feeds' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'feeds' ? 'page' : 'false'">
+                <i class="fa-solid fa-rss text-[9px]" aria-hidden="true"></i> Feeds
             </button>
             {% if user.is_superuser %}
             <button @click="viewMode = 'command'"
                     :class="viewMode === 'command' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-200'"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all">
-                <i class="fa-solid fa-terminal text-[9px]"></i> Command
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all"
+                    :aria-current="viewMode === 'command' ? 'page' : 'false'">
+                <i class="fa-solid fa-terminal text-[9px]" aria-hidden="true"></i> Command
             </button>
             {% endif %}
         </nav>
@@ -635,7 +789,7 @@
         <!-- Right: admin links + status + dark toggle + logout -->
         <div class="flex items-center gap-1">
             <!-- Status chip -->
-            <div class="hidden lg:flex items-center gap-1.5 bg-slate-800/60 rounded-lg px-2.5 py-1.5 mr-2">
+            <div class="hidden lg:flex items-center gap-1.5 bg-slate-800/60 rounded-lg px-2.5 py-1.5 mr-2" aria-hidden="true">
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span class="text-[9px] font-mono text-slate-500 uppercase tracking-widest">Live</span>
                 <span class="text-[9px] font-mono text-slate-600 ml-1 uppercase">{% now "d M Y" %}</span>
@@ -643,1234 +797,110 @@
 
             {% if user.is_superuser %}
             <a href="{% url 'cron_manager' %}"
-               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-all">
-                <i class="fa-solid fa-clock text-[9px]"></i>
+               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-all"
+               aria-label="Cron manager">
+                <i class="fa-solid fa-clock text-[9px]" aria-hidden="true"></i>
                 <span class="hidden lg:block">Cron</span>
             </a>
             <a href="{% url 'settings' %}"
-               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-all">
-                <i class="fa-solid fa-sliders text-[9px]"></i>
+               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-all"
+               aria-label="Settings">
+                <i class="fa-solid fa-sliders text-[9px]" aria-hidden="true"></i>
                 <span class="hidden lg:block">Settings</span>
             </a>
-            <div class="w-px h-5 bg-slate-800 mx-1"></div>
+            <div class="w-px h-5 bg-slate-800 mx-1" aria-hidden="true"></div>
             {% endif %}
 
             <button @click="toggleDark()"
                     class="p-2 rounded-lg text-slate-500 hover:text-indigo-400 hover:bg-slate-800 transition-all"
-                    :title="darkMode ? 'Light mode' : 'Dark mode'">
-                <i class="fa-solid text-xs" :class="darkMode ? 'fa-sun' : 'fa-moon'"></i>
+                    :aria-label="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+                <i class="fa-solid text-xs" :class="darkMode ? 'fa-sun' : 'fa-moon'" aria-hidden="true"></i>
             </button>
 
             <a href="{% url 'logout' %}"
-               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-all ml-1">
-                <i class="fa-solid fa-power-off text-[9px]"></i>
+               class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-all ml-1"
+               aria-label="Log out">
+                <i class="fa-solid fa-power-off text-[9px]" aria-hidden="true"></i>
                 <span class="hidden lg:block">Logout</span>
             </a>
         </div>
     </header>
 
     <div class="flex flex-1 overflow-hidden relative">
-
-        <!-- Mobile sidebar backdrop -->
-        <div x-show="sidebarOpen && viewMode === 'entries'"
-             @click="sidebarOpen = false"
-             class="md:hidden fixed inset-0 bg-black/60 z-20"
-             x-transition:enter="transition ease-out duration-200"
-             x-transition:enter-start="opacity-0"
-             x-transition:enter-end="opacity-100"
-             x-transition:leave="transition ease-in duration-150"
-             x-transition:leave-start="opacity-100"
-             x-transition:leave-end="opacity-0">
-        </div>
-
-        <aside
-            x-show="sidebarOpen && viewMode === 'entries'"
-            x-transition:enter="transition ease-out duration-300"
-            x-transition:enter-start="-ml-80"
-            x-transition:enter-end="ml-0"
-            x-transition:leave="transition ease-in duration-300"
-            x-transition:leave-start="ml-0"
-            x-transition:leave-end="-ml-80"
-            class="fixed md:static inset-y-14 md:inset-auto left-0 w-4/5 max-w-xs md:w-80 md:max-w-none border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 transition-colors duration-300 z-30 md:z-20"
-        >
-            <div class="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
-                <div class="relative">
-                    <template x-if="searchLoading">
-                        <i class="fa-solid fa-circle-notch absolute left-3 top-2.5 text-indigo-400 text-xs animate-spin"></i>
-                    </template>
-                    <template x-if="!searchLoading">
-                        <i class="fa-solid fa-search absolute left-3 top-2.5 text-slate-400 text-xs" :class="isSearchMode && 'text-indigo-400'"></i>
-                    </template>
-                    <input type="text" x-model="searchQuery" placeholder="Search titles & content..."
-                           class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg py-2 pl-9 pr-8 text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                           :class="isSearchMode && 'border-indigo-400/50 dark:border-indigo-500/40'">
-                    <button x-show="searchQuery.length > 0"
-                            @click="searchQuery = ''; isSearchMode = false; searchResults = []"
-                            class="absolute right-2 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-0.5">
-                        <i class="fa-solid fa-xmark text-xs"></i>
-                    </button>
-                </div>
-                <!-- Search mode indicator -->
-                <div x-show="isSearchMode" x-transition class="mt-2 flex items-center justify-between">
-                    <span class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-wider">
-                        <i class="fa-solid fa-database mr-1"></i>Content search
-                    </span>
-                    <span class="text-[9px] font-mono text-slate-400 dark:text-slate-600"
-                          x-text="searchResults.length + ' result' + (searchResults.length !== 1 ? 's' : '')"></span>
-                </div>
-            </div>
-
-            <!-- Filter tabs: All / Saved -->
-            <div class="flex items-center gap-1 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
-                <button @click="showBookmarksOnly = false"
-                        :class="!showBookmarksOnly ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200' : 'text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400'"
-                        class="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all">
-                    <i class="fa-solid fa-layer-group text-[8px]"></i> All
-                </button>
-                <button @click="showBookmarksOnly = true"
-                        :class="showBookmarksOnly ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'text-slate-400 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-400'"
-                        class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all">
-                    <i class="fa-solid fa-bookmark text-[8px]"></i> Saved
-                    <span x-show="Object.keys(bookmarkedIds).length > 0"
-                          class="bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[8px] font-mono px-1 rounded"
-                          x-text="Object.keys(bookmarkedIds).length"></span>
-                </button>
-            </div>
-            
-            <div id="sidebar-scroll" class="flex-1 overflow-y-auto custom-scrollbar">
-                <template x-for="item in filteredItems" :key="item.key">
-                    <div @click="selectItem(item.id)"
-                         :class="selectedId === item.id
-                            ? 'bg-indigo-50 dark:bg-slate-800 border-l-[3px] border-indigo-500'
-                            : 'border-l-[3px] border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/40'"
-                         class="px-4 py-3.5 cursor-pointer border-b border-slate-50 dark:border-slate-800/60 transition-all duration-150 group">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <template x-if="bookmarkedIds[item.id]">
-                                <i class="fa-solid fa-bookmark text-amber-400 text-[8px] mr-1 shrink-0"></i>
-                            </template>
-                            <span class="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded"
-                                  :class="{
-                                    'bg-indigo-100 dark:bg-indigo-500/15 text-indigo-600 dark:text-indigo-400': categoryColor(item.category) === 'indigo',
-                                    'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400': categoryColor(item.category) === 'emerald',
-                                    'bg-blue-100 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400': categoryColor(item.category) === 'blue',
-                                    'bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400': categoryColor(item.category) === 'amber',
-                                    'bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400': categoryColor(item.category) === 'rose',
-                                    'bg-purple-100 dark:bg-purple-500/15 text-purple-600 dark:text-purple-400': categoryColor(item.category) === 'purple',
-                                  }"
-                                  x-text="item.category"></span>
-                            <span class="text-[9px] text-slate-400 dark:text-slate-600 font-mono" x-text="item.date_display"></span>
-                        </div>
-                        <h4 class="text-xs font-semibold text-slate-700 dark:text-slate-300 group-hover:text-indigo-700 dark:group-hover:text-indigo-400 leading-snug line-clamp-2 transition-colors"
-                            x-text="item.title"></h4>
-                    </div>
-                </template>
-                <!-- Empty bookmarks state -->
-                <div x-show="showBookmarksOnly && Object.keys(bookmarkedIds).length === 0"
-                     class="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
-                    <i class="fa-regular fa-bookmark text-slate-300 dark:text-slate-700 text-3xl"></i>
-                    <p class="text-[10px] font-mono text-slate-400 dark:text-slate-600 leading-relaxed">
-                        No saved reports yet.<br>Tap the bookmark icon while reading to save.
-                    </p>
-                </div>
-
-                <div id="scroll-sentinel" class="h-1"></div>
-                <div x-show="loadingMore" class="py-4 text-center">
-                    <span class="text-[9px] font-mono text-slate-400 dark:text-slate-700 animate-pulse uppercase tracking-widest">Loading...</span>
-                </div>
-            </div>
-        </aside>
-
-        <main class="flex-1 overflow-y-auto bg-white dark:bg-slate-950 custom-scrollbar relative transition-colors duration-300" @scroll.passive="onMainScroll($event)">
-            <template x-if="viewMode === 'chat'">
-                <div class="h-full flex flex-col bg-slate-50 dark:bg-slate-950 relative pb-14 md:pb-0">
-
-                    <div class="absolute top-3 right-3 md:top-4 md:right-6 z-10 flex gap-2">
-                        <button @click="chatMessages = []; chatHistory = []"
-                                class="bg-slate-900/50 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-lg text-[9px] font-black text-slate-500 hover:text-red-400 transition-all uppercase tracking-widest">
-                            <i class="fa-solid fa-trash-can mr-1"></i> Clear Terminal
-                        </button>
-                    </div>
-
-                    <div id="chat-scroll" class="flex-1 overflow-y-auto p-4 md:p-8 lg:p-12 custom-scrollbar">
-
-                        <!-- Empty state with starter prompts -->
-                        <template x-if="chatMessages.length === 0 && !chatLoading">
-                            <div class="h-full flex flex-col items-center justify-center gap-8 py-12">
-                                <div class="text-center space-y-2">
-                                    <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4">
-                                        <i class="fa-solid fa-bolt-lightning text-indigo-500 text-xl"></i>
-                                    </div>
-                                    <h3 class="text-sm font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Intel Chat</h3>
-                                    <p class="text-xs text-slate-400 font-mono">RAG-powered search across your entire archive</p>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
-                                    <template x-for="prompt in [
-                                        'What are the most discussed topics recently?',
-                                        'Summarise key events involving India this week',
-                                        'Which organisations appear most frequently?',
-                                        'What geopolitical risks are emerging?',
-                                        'Find reports about economic policy changes',
-                                        'What are the latest developments in the archive?'
-                                    ]" :key="prompt">
-                                        <button @click="sendChatQuery(prompt)"
-                                                class="text-left bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-indigo-500/40 dark:hover:border-indigo-500/40 rounded-xl px-4 py-3 text-[11px] text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all group">
-                                            <i class="fa-solid fa-arrow-right text-[8px] mr-2 text-slate-300 dark:text-slate-700 group-hover:text-indigo-500 transition-colors"></i>
-                                            <span x-text="prompt"></span>
-                                        </button>
-                                    </template>
-                                </div>
-                            </div>
-                        </template>
-
-                        <div class="space-y-8 md:space-y-10">
-                        <template x-for="(msg, index) in chatMessages" :key="index">
-                            <div :class="msg.role === 'user' ? 'flex flex-col items-end' : 'flex flex-col items-start'">
-
-                                <span class="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2 px-2"
-                                      x-text="msg.role === 'user' ? 'Operator Query' : 'System Intelligence'"></span>
-
-                                <div :class="msg.role === 'user'
-                                    ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-2xl shadow-indigo-500/20 px-5 py-3 md:px-6 md:py-4'
-                                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-2xl rounded-tl-none shadow-xl p-6 md:p-8'"
-                                    class="max-w-[85%] relative">
-
-                                    <template x-if="msg.role === 'ai'">
-                                        <div class="absolute top-0 left-0 w-1 h-full bg-indigo-500 rounded-tl-2xl"></div>
-                                    </template>
-
-                                    <div class="prose prose-sm dark:prose-invert leading-relaxed" x-html="msg.text"></div>
-
-                                    <template x-if="msg.sources && msg.sources.length > 0">
-                                        <div class="mt-6 pt-5 border-t border-slate-100 dark:border-slate-800">
-                                            <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
-                                                <i class="fa-solid fa-link text-indigo-500"></i> Sources
-                                            </p>
-                                            <div class="flex flex-wrap gap-2">
-                                                <template x-for="src in msg.sources" :key="src.id">
-                                                    <button @click="jumpToSource(src)"
-                                                            class="bg-indigo-500/5 hover:bg-indigo-500/15 border border-indigo-500/20 px-3 py-2 rounded-lg transition-all flex flex-col items-start gap-0.5 group/btn text-left">
-                                                        <span class="text-[10px] font-semibold text-indigo-400 group-hover/btn:text-indigo-300 leading-tight" x-text="src.title"></span>
-                                                        <div class="flex items-center gap-2">
-                                                            <span x-show="src.playlist_title" class="text-[8px] font-mono text-slate-500" x-text="src.playlist_title"></span>
-                                                            <span x-show="src.date" class="text-[8px] font-mono text-slate-600" x-text="src.date"></span>
-                                                        </div>
-                                                    </button>
-                                                </template>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                        </template>
-
-                        <div x-show="chatLoading" class="flex flex-col gap-4 animate-pulse">
-                            <div class="flex items-center gap-3 text-indigo-500 font-mono text-[9px] tracking-[0.3em]">
-                                <i class="fa-solid fa-microchip animate-spin"></i> CROSS-REFERENCING ARCHIVE...
-                            </div>
-                            <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
-                        </div>
-                        </div>
-                    </div>
-
-                    <div class="p-4 md:p-8 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
-                        <div class="max-w-5xl mx-auto">
-                            <!-- History indicator -->
-                            <div x-show="chatHistory.length > 0" class="flex items-center gap-2 mb-2 px-1">
-                                <span class="text-[8px] font-mono text-indigo-500/70 uppercase tracking-widest">
-                                    <i class="fa-solid fa-circle-nodes mr-1"></i>
-                                    <span x-text="Math.floor(chatHistory.length / 2) + ' turn' + (chatHistory.length > 2 ? 's' : '') + ' in context'"></span>
-                                </span>
-                            </div>
-                            <div class="relative">
-                                <input
-                                    type="text"
-                                    x-model="chatQuery"
-                                    @keyup.enter.prevent="sendChatQuery()"
-                                    placeholder="Ask a follow-up or start a new query..."
-                                    class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl py-3 md:py-5 pl-5 md:pl-8 pr-14 md:pr-20 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-inner font-medium"
-                                >
-                                <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                                    <span class="text-[8px] font-black text-slate-500 uppercase mr-2 hidden md:block">Enter ↵</span>
-                                    <button @click="sendChatQuery()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center">
-                                        <i class="fa-solid fa-bolt-lightning text-xs"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </template>
-            
-            <template x-if="viewMode === 'stacks'">
-                <div class="h-full overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950 pb-14 md:pb-0">
-                    <!-- Stats hero -->
-                    <div class="border-b border-slate-200 dark:border-slate-800/60 bg-white dark:bg-gradient-to-b dark:from-slate-900 dark:to-slate-950 px-4 md:px-8 py-5 md:py-8">
-                        <div class="max-w-7xl mx-auto">
-                            <p class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.35em] mb-3">Intelligence Archive</p>
-                            <div class="flex items-end justify-between gap-4 flex-wrap">
-                                <h2 class="text-2xl md:text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter leading-none">
-                                    Active Stacks
-                                </h2>
-                                <div class="flex items-center gap-4 md:gap-8">
-                                    <div class="text-right">
-                                        <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-0.5">Total Reports</p>
-                                        <p class="text-3xl font-black text-slate-900 dark:text-white tabular-nums" x-text="totalCount.toLocaleString()"></p>
-                                    </div>
-                                    <div class="w-px h-10 bg-slate-200 dark:bg-slate-800"></div>
-                                    <div class="text-right">
-                                        <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-0.5">Stacks</p>
-                                        <p class="text-3xl font-black text-indigo-500 dark:text-indigo-400 tabular-nums" x-text="stacks.length"></p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Cards grid -->
-                    <div class="p-4 md:p-8 max-w-7xl mx-auto">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                            <template x-for="(stack, idx) in stacks" :key="stack.id">
-                                <div @click="openStack(stack.id)"
-                                     class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:border-indigo-400/50 dark:hover:border-slate-600 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:shadow-black/40 hover:-translate-y-1">
-
-                                    <!-- Thumbnail header or accent bar -->
-                                    <template x-if="stack.thumbnail_key">
-                                        <div class="relative overflow-hidden" style="height: 130px;">
-                                            <img :src="`https://i.ytimg.com/vi/${stack.thumbnail_key}/mqdefault.jpg`"
-                                                 :alt="stack.title"
-                                                 class="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
-                                                 loading="lazy">
-                                            <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-                                            <div class="absolute inset-x-0 top-0 h-[3px]"
-                                                 :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
-                                            </div>
-                                        </div>
-                                    </template>
-                                    <template x-if="!stack.thumbnail_key">
-                                        <div class="h-[3px] w-full"
-                                             :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
-                                        </div>
-                                    </template>
-
-                                    <div class="p-6">
-                                        <!-- Icon + ID row -->
-                                        <div class="flex items-center justify-between mb-5">
-                                            <div class="w-9 h-9 rounded-lg flex items-center justify-center"
-                                                 :class="['bg-indigo-500/10 text-indigo-400','bg-emerald-500/10 text-emerald-400','bg-blue-500/10 text-blue-400','bg-amber-500/10 text-amber-400','bg-rose-500/10 text-rose-400','bg-purple-500/10 text-purple-400'][idx % 6]">
-                                                <i class="fa-solid fa-database text-sm"></i>
-                                            </div>
-                                            <span class="text-[8px] font-mono text-slate-400 dark:text-slate-700 uppercase tracking-wider truncate max-w-[140px]" x-text="stack.id"></span>
-                                        </div>
-
-                                        <!-- Stack title -->
-                                        <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 leading-snug mb-4 group-hover:text-slate-900 dark:group-hover:text-white transition-colors line-clamp-2" x-text="stack.title"></h3>
-
-                                        <!-- Count + arrow -->
-                                        <div class="flex items-end justify-between">
-                                            <div>
-                                                <p class="text-4xl font-black text-slate-900 dark:text-white tabular-nums leading-none" x-text="stack.count"></p>
-                                                <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase mt-1">Reports</p>
-                                            </div>
-                                            <span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest translate-x-1 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200"
-                                                  :class="['text-indigo-400','text-emerald-400','text-blue-400','text-amber-400','text-rose-400','text-purple-400'][idx % 6]">
-                                                Open <i class="fa-solid fa-arrow-right"></i>
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-            </template>
-            
-            <template x-if="viewMode === 'entries' && activeItem">
-                <div class="pb-14 md:pb-0">
-                    <!-- Reading progress bar -->
-                    <div class="sticky top-0 z-10 h-[3px] bg-slate-200 dark:bg-slate-800">
-                        <div class="h-full bg-indigo-500 transition-[width] duration-150 ease-linear"
-                             :style="`width: ${readingProgress}%`"></div>
-                    </div>
-
-                    <div class="max-w-3xl mx-auto px-4 md:px-8 py-6 md:py-10">
-                        <!-- Back + meta row -->
-                        <div class="flex items-center gap-3 mb-8 flex-wrap">
-                            <button @click="goBackToStacks()"
-                                    class="flex items-center gap-1.5 text-[9px] font-black text-slate-500 dark:text-slate-600 hover:text-indigo-500 uppercase tracking-widest transition-colors">
-                                <i class="fa-solid fa-chevron-left text-[8px]"></i> Stacks
-                            </button>
-                            <span class="text-slate-300 dark:text-slate-800 text-xs">/</span>
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 dark:text-indigo-400 text-[9px] font-bold rounded uppercase"
-                                  x-text="activeItem.category"></span>
-                            <template x-if="activeItem.date_display">
-                                <span class="text-[9px] font-mono text-slate-400 dark:text-slate-600 ml-1"
-                                      x-text="activeItem.date_display + (activeItem.time_display ? ' · ' + activeItem.time_display : '')"></span>
-                            </template>
-                            <template x-if="activeItem.playlist_title">
-                                <span class="text-slate-300 dark:text-slate-800 text-xs">·</span>
-                                <span class="text-[9px] font-mono text-slate-500 dark:text-slate-600 truncate max-w-[200px]"
-                                      x-text="activeItem.playlist_title"></span>
-                            </template>
-                        </div>
-
-                        <!-- Title + bookmark -->
-                        <div class="flex items-start gap-3 mb-3">
-                            <h1 class="flex-1 text-2xl md:text-4xl font-black text-slate-900 dark:text-white leading-[1.1]"
-                                x-text="activeItem.title"></h1>
-                            <button @click="toggleBookmark(activeItem.id, activeItem.title)"
-                                    :class="bookmarkedIds[activeItem.id] ? 'text-amber-500 hover:text-amber-400' : 'text-slate-300 dark:text-slate-700 hover:text-amber-400 dark:hover:text-amber-500'"
-                                    class="shrink-0 mt-1 md:mt-2 transition-colors p-1 rounded-lg"
-                                    :title="bookmarkedIds[activeItem.id] ? 'Remove bookmark' : 'Save report'">
-                                <i :class="bookmarkedIds[activeItem.id] ? 'fa-solid fa-bookmark' : 'fa-regular fa-bookmark'"
-                                   class="text-lg md:text-xl"></i>
-                            </button>
-                        </div>
-                        <p class="text-[10px] font-mono text-slate-400 dark:text-slate-600 mb-8 uppercase tracking-widest"
-                           x-text="'Ref: ' + activeItem.key"></p>
-
-                        <!-- Accent divider -->
-                        <div class="flex items-center gap-3 mb-8">
-                            <div class="h-[3px] w-16 bg-indigo-500 rounded-full"></div>
-                            <div class="h-[1px] flex-1 bg-slate-100 dark:bg-slate-800"></div>
-                        </div>
-
-                        <!-- Video thumbnail -->
-                        <template x-if="activeItem.key">
-                            <div class="mb-8 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 shadow-sm">
-                                <img :src="`https://i.ytimg.com/vi/${activeItem.key}/hqdefault.jpg`"
-                                     :alt="activeItem.title"
-                                     class="w-full object-cover"
-                                     loading="lazy">
-                            </div>
-                        </template>
-
-                        <!-- Entity chips -->
-                        <div class="flex flex-wrap gap-1.5 mb-10"
-                             x-show="(activeItem.entities?.locations?.length || activeItem.entities?.people?.length || activeItem.entities?.organizations?.length)">
-                            <template x-for="loc in (activeItem.entities?.locations || [])">
-                                <button @click="searchQuery = loc; viewMode = 'entries'; selectedPlaylistId = null"
-                                        class="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500/8 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold rounded-full uppercase hover:bg-emerald-500 hover:text-white hover:border-transparent transition-all">
-                                    <i class="fa-solid fa-location-dot text-[8px]"></i> <span x-text="loc"></span>
-                                </button>
-                            </template>
-                            <template x-for="person in (activeItem.entities?.people || [])">
-                                <button @click="searchQuery = person; viewMode = 'entries'; selectedPlaylistId = null"
-                                        class="inline-flex items-center gap-1 px-2 py-1 bg-blue-500/8 border border-blue-500/20 text-blue-600 dark:text-blue-400 text-[9px] font-bold rounded-full uppercase hover:bg-blue-500 hover:text-white hover:border-transparent transition-all">
-                                    <i class="fa-solid fa-user text-[8px]"></i> <span x-text="person"></span>
-                                </button>
-                            </template>
-                            <template x-for="org in (activeItem.entities?.organizations || [])">
-                                <button @click="searchQuery = org; viewMode = 'entries'; selectedPlaylistId = null"
-                                        class="inline-flex items-center gap-1 px-2 py-1 bg-amber-500/8 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[9px] font-bold rounded-full uppercase hover:bg-amber-500 hover:text-white hover:border-transparent transition-all">
-                                    <i class="fa-solid fa-building text-[8px]"></i> <span x-text="org"></span>
-                                </button>
-                            </template>
-                        </div>
-
-                        <!-- Article body -->
-                        <article class="prose prose-slate dark:prose-invert lg:prose-lg prose-indigo">
-                            <template x-if="activeItem.loading">
-                                <div class="space-y-4 animate-pulse">
-                                    <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-3/4"></div>
-                                    <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded"></div>
-                                    <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-5/6"></div>
-                                    <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
-                                    <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-2/3"></div>
-                                </div>
-                            </template>
-                            <template x-if="!activeItem.loading">
-                                <div x-html="marked.parse(activeItem.value || '')"
-                                     class="text-slate-700 dark:text-slate-300 selection:bg-indigo-100 dark:selection:bg-indigo-900">
-                                </div>
-                            </template>
-                        </article>
-
-                        <!-- Related Reports -->
-                        <div x-show="relatedReports.length > 0 || relatedLoading" class="mt-14">
-                            <div class="flex items-center gap-3 mb-5">
-                                <div class="h-[1px] w-8 bg-slate-200 dark:bg-slate-800"></div>
-                                <p class="text-[9px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-[0.25em] whitespace-nowrap">
-                                    <i class="fa-solid fa-circle-nodes mr-1.5 text-indigo-400"></i>Related Reports
-                                </p>
-                                <div class="h-[1px] flex-1 bg-slate-100 dark:bg-slate-800"></div>
-                            </div>
-
-                            <!-- Skeleton while loading -->
-                            <div x-show="relatedLoading" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse"></div>
-                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse"></div>
-                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse sm:block hidden"></div>
-                                <div class="h-[72px] bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse sm:block hidden"></div>
-                            </div>
-
-                            <!-- Results -->
-                            <div x-show="!relatedLoading" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <template x-for="rel in relatedReports" :key="rel.id">
-                                    <button @click="selectItem(rel.id)"
-                                            class="text-left p-3.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:border-indigo-400/40 dark:hover:border-slate-600 hover:bg-white dark:hover:bg-slate-800/60 transition-all group">
-                                        <div class="flex items-center gap-2 mb-1.5">
-                                            <span class="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 dark:text-indigo-400"
-                                                  x-text="rel.category"></span>
-                                            <span class="text-[9px] font-mono text-slate-400 dark:text-slate-600 ml-auto" x-text="rel.date_display"></span>
-                                        </div>
-                                        <p class="text-xs font-semibold text-slate-700 dark:text-slate-300 leading-snug line-clamp-2 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors"
-                                           x-text="rel.title"></p>
-                                    </button>
-                                </template>
-                            </div>
-                        </div>
-
-                        <!-- Footer -->
-                        <div class="mt-16 pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[9px] font-mono text-slate-400 dark:text-slate-700 uppercase tracking-widest">
-                            <span class="flex items-center gap-2">
-                                <span class="w-1.5 h-1.5 rounded-full bg-indigo-500/50"></span>
-                                End of Report
-                            </span>
-                            <span x-text="activeItem.date_display"></span>
-                        </div>
-                    </div>
-                </div>
-            </template>
-
-            <template x-if="viewMode === 'command'">
-                <div class="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4 md:p-8 lg:p-12 pb-20 md:pb-8 lg:pb-12 custom-scrollbar">
-                    <div class="max-w-5xl mx-auto">
-
-                        <div class="flex flex-wrap justify-between items-start gap-4 mb-8 md:mb-10">
-                            <div>
-                                <p class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.3em] mb-2">Superuser</p>
-                                <h2 class="text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter leading-none">
-                                    Command <span class="text-indigo-500">Center</span>
-                                </h2>
-                            </div>
-                            <button @click="showNewTaskModal = !showNewTaskModal"
-                                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black px-5 py-2.5 rounded-xl transition-all shadow-lg uppercase tracking-widest">
-                                <i class="fa-solid" :class="showNewTaskModal ? 'fa-xmark' : 'fa-plus'"></i>
-                                <span x-text="showNewTaskModal ? 'Cancel' : 'New Task'"></span>
-                            </button>
-                        </div>
-
-                        <!-- New task form -->
-                        <div x-show="showNewTaskModal" x-transition
-                             class="mb-10 bg-indigo-500/5 border border-dashed border-indigo-500/30 rounded-2xl p-7">
-                            <p class="text-[9px] font-black text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.25em] mb-6 flex items-center gap-2">
-                                <i class="fa-solid fa-plus"></i> New Intelligence Task
-                            </p>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                <div class="space-y-1.5">
-                                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Task Key</label>
-                                    <input x-model="newTask.task_key" type="text" placeholder="e.g. risk_analysis"
-                                           class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all">
-                                </div>
-                                <div class="space-y-1.5">
-                                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Display Name</label>
-                                    <input x-model="newTask.display_name" type="text" placeholder="e.g. Geopolitical Risk"
-                                           class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all">
-                                </div>
-                                <div class="space-y-1.5">
-                                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Target Collection</label>
-                                    <select x-model="newTask.target_collection"
-                                            class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all">
-                                        <option value="mass_records">mass_records</option>
-                                        <option value="action_items">action_items</option>
-                                        <option value="analytics">analytics</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5 mb-6">
-                                <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Prompt Template</label>
-                                <textarea x-model="newTask.prompt_template" rows="4"
-                                          placeholder="Analyze the following for... {transcript}"
-                                          class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 font-mono leading-relaxed resize-none transition-all"></textarea>
-                                <p class="text-[9px] text-slate-400 font-mono">Include <code class="text-indigo-500">{transcript}</code> as the placeholder.</p>
-                            </div>
-                            <button @click="saveTask(newTask, true)"
-                                    class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] py-3 rounded-xl text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-indigo-600/20 transition-all">
-                                Deploy Task
-                            </button>
-                        </div>
-
-                        <!-- Task cards -->
-                        <div class="grid gap-5">
-                            <template x-for="task in tasks" :key="task.id">
-                                <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-                                    <div class="flex justify-between items-start mb-5">
-                                        <div>
-                                            <h3 class="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight" x-text="task.display_name"></h3>
-                                            <div class="flex gap-3 mt-1.5">
-                                                <span class="text-[9px] font-mono text-slate-400 uppercase" x-text="'Key: ' + task.task_key"></span>
-                                                <span class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase" x-text="'→ ' + task.target_collection"></span>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700 shrink-0">
-                                            <span :class="task.is_active ? 'bg-emerald-500' : 'bg-red-500'" class="w-1.5 h-1.5 rounded-full"></span>
-                                            <span class="text-[8px] font-black text-slate-500 dark:text-slate-400 uppercase" x-text="task.is_active ? 'Online' : 'Offline'"></span>
-                                        </div>
-                                    </div>
-                                    <textarea
-                                        x-model="task.prompt_template"
-                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-xs font-mono text-slate-600 dark:text-slate-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none"
-                                        rows="4"></textarea>
-                                    <div class="flex justify-end mt-3">
-                                        <button @click="saveTask(task)"
-                                                class="bg-indigo-500/10 hover:bg-indigo-600 text-indigo-600 dark:text-indigo-400 hover:text-white text-[9px] font-black px-5 py-2 rounded-lg border border-indigo-500/20 hover:border-transparent transition-all uppercase tracking-widest">
-                                            Save Changes
-                                        </button>
-                                    </div>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-            </template>
-
-            <div
-                x-show="viewMode === 'nexus'"
-                class="h-full w-full bg-slate-950 relative overflow-hidden"
-                style="display: none;"
-                :class="{ 'block': viewMode === 'nexus' }"
-                @mousemove="nexusMouseX = $event.clientX; nexusMouseY = $event.clientY"
-            >
-                <!-- Loading overlay -->
-                <div x-show="nexusLoading"
-                    x-transition:enter="transition ease-out duration-300"
-                    x-transition:leave="transition ease-in duration-500"
-                    class="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-xl">
-                    <div class="flex flex-col items-center gap-6">
-                        <div class="relative w-20 h-20">
-                            <div class="absolute inset-0 border-4 border-indigo-500/10 rounded-full"></div>
-                            <div class="absolute inset-0 border-4 border-t-indigo-500 rounded-full animate-spin"></div>
-                            <div class="absolute inset-4 border-2 border-emerald-500/20 border-b-emerald-500 rounded-full animate-[spin_2s_linear_infinite_reverse]"></div>
-                        </div>
-                        <div class="text-center space-y-2">
-                            <p class="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] animate-pulse">Initializing Nexus Engine</p>
-                            <p class="text-[8px] font-mono text-slate-500 uppercase tracking-widest">Synthesizing Cross-Report Relationships...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Hover tooltip (fixed to escape overflow) -->
-                <template x-if="hoverNode && viewMode === 'nexus'">
-                    <div :style="`left: ${nexusMouseX + 14}px; top: ${nexusMouseY - 12}px`"
-                         class="fixed z-[200] pointer-events-none">
-                        <div class="bg-slate-900/95 border border-slate-700/80 rounded-xl px-3 py-2 shadow-2xl backdrop-blur-sm max-w-[220px]">
-                            <p class="font-bold text-white text-xs leading-snug truncate" x-text="hoverNode.name"></p>
-                            <p class="text-[9px] font-mono uppercase tracking-wider mt-0.5"
-                               :class="{
-                                   'text-indigo-400': hoverNode.type === 'report',
-                                   'text-emerald-400': hoverNode.type === 'locations',
-                                   'text-blue-400':    hoverNode.type === 'people',
-                                   'text-amber-400':   hoverNode.type === 'organizations'
-                               }"
-                               x-text="hoverNode.type"></p>
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Search + filters (top right) -->
-                <div class="absolute top-3 md:top-6 left-3 right-3 md:left-auto md:right-6 z-20 md:w-72 lg:w-96">
-                    <div class="relative group">
-                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xs group-focus-within:text-indigo-400 transition-colors pointer-events-none"></i>
-                        <input
-                            type="text"
-                            x-model="nexusQuery"
-                            placeholder="Search nodes, entities, places..."
-                            class="w-full bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl py-3 pl-11 pr-10 text-[11px] font-mono text-white placeholder-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all shadow-2xl"
-                        >
-                        <button x-show="nexusQuery"
-                                @click="nexusQuery = ''; nexusMatches = []; nexusMatchIndex = 0"
-                                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors p-1">
-                            <i class="fa-solid fa-xmark text-xs"></i>
-                        </button>
-                    </div>
-                    <!-- Match counter + next/prev -->
-                    <div x-show="nexusQuery.length > 1" class="flex items-center justify-between mt-2 px-1">
-                        <span class="text-[9px] font-mono"
-                              :class="nexusMatches.length ? 'text-indigo-400' : 'text-slate-600'"
-                              x-text="nexusMatches.length
-                                  ? (nexusMatchIndex + 1) + ' / ' + nexusMatches.length + (nexusMatches.length !== 1 ? ' matches' : ' match')
-                                  : 'No matches'">
-                        </span>
-                        <div x-show="nexusMatches.length > 1" class="flex gap-1">
-                            <button @click="nexusGoToMatch(-1)"
-                                    class="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all">
-                                <i class="fa-solid fa-chevron-up text-[8px]"></i>
-                            </button>
-                            <button @click="nexusGoToMatch(1)"
-                                    class="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 hover:text-white transition-all">
-                                <i class="fa-solid fa-chevron-down text-[8px]"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Type filter chips -->
-                    <div class="flex flex-wrap gap-1.5 mt-2 justify-end">
-                        <button @click="nexusFilter.report = !nexusFilter.report"
-                                :class="nexusFilter.report ? 'border-indigo-500/60 text-indigo-400 bg-indigo-500/10' : 'border-slate-700 text-slate-600'"
-                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
-                            Reports
-                        </button>
-                        <button @click="nexusFilter.locations = !nexusFilter.locations"
-                                :class="nexusFilter.locations ? 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10' : 'border-slate-700 text-slate-600'"
-                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
-                            Locations
-                        </button>
-                        <button @click="nexusFilter.people = !nexusFilter.people"
-                                :class="nexusFilter.people ? 'border-blue-500/60 text-blue-400 bg-blue-500/10' : 'border-slate-700 text-slate-600'"
-                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
-                            People
-                        </button>
-                        <button @click="nexusFilter.organizations = !nexusFilter.organizations"
-                                :class="nexusFilter.organizations ? 'border-amber-500/60 text-amber-400 bg-amber-500/10' : 'border-slate-700 text-slate-600'"
-                                class="px-2 py-0.5 rounded-md border text-[9px] font-bold uppercase transition-all bg-slate-900/80 backdrop-blur-sm">
-                            Orgs
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Legend + stats (top left) -->
-                <div class="hidden md:block absolute top-6 left-6 z-10 bg-slate-900/60 backdrop-blur-md border border-slate-800 p-4 rounded-2xl pointer-events-none">
-                    <h3 class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3">Legend</h3>
-                    <div class="space-y-2">
-                        <div class="flex items-center gap-2">
-                            <span class="w-2.5 h-2.5 rounded-full bg-indigo-400" style="box-shadow:0 0 6px #818cf8"></span>
-                            <span class="text-[9px] text-slate-400 uppercase">Reports</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500" style="box-shadow:0 0 6px #10b981"></span>
-                            <span class="text-[9px] text-slate-400 uppercase">Locations</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="w-2.5 h-2.5 rounded-full bg-blue-500" style="box-shadow:0 0 6px #3b82f6"></span>
-                            <span class="text-[9px] text-slate-400 uppercase">People</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="w-2.5 h-2.5 rounded-full bg-amber-500" style="box-shadow:0 0 6px #f59e0b"></span>
-                            <span class="text-[9px] text-slate-400 uppercase">Organizations</span>
-                        </div>
-                    </div>
-                    <template x-if="nexusStats.nodes > 0">
-                        <div class="mt-4 pt-3 border-t border-slate-800 space-y-1.5">
-                            <div class="flex justify-between gap-6">
-                                <span class="text-[8px] text-slate-600 uppercase">Nodes</span>
-                                <span class="text-[8px] font-mono text-slate-400" x-text="nexusStats.nodes"></span>
-                            </div>
-                            <div class="flex justify-between gap-6">
-                                <span class="text-[8px] text-slate-600 uppercase">Links</span>
-                                <span class="text-[8px] font-mono text-slate-400" x-text="nexusStats.links"></span>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-
-                <!-- Selected node panel (bottom) -->
-                <div x-show="nexusSelectedNode"
-                     x-transition:enter="transition ease-out duration-200"
-                     x-transition:enter-start="opacity-0 translate-y-2"
-                     x-transition:enter-end="opacity-100 translate-y-0"
-                     x-transition:leave="transition ease-in duration-150"
-                     x-transition:leave-start="opacity-100 translate-y-0"
-                     x-transition:leave-end="opacity-0 translate-y-2"
-                     class="absolute bottom-14 md:bottom-0 left-0 right-0 z-20 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-4 md:px-6 py-3 md:py-4 flex items-center justify-between gap-3">
-                    <div class="flex items-center gap-3 min-w-0">
-                        <span class="w-3 h-3 rounded-full flex-shrink-0"
-                              :style="nexusSelectedNode ? { background: nexusSelectedNode.color, boxShadow: '0 0 8px ' + nexusSelectedNode.color } : {}">
-                        </span>
-                        <div class="min-w-0">
-                            <p class="text-sm font-bold text-white truncate" x-text="nexusSelectedNode?.name"></p>
-                            <p class="text-[9px] font-mono uppercase tracking-wider mt-0.5"
-                               :class="{
-                                   'text-indigo-400':  nexusSelectedNode?.type === 'report',
-                                   'text-emerald-400': nexusSelectedNode?.type === 'locations',
-                                   'text-blue-400':    nexusSelectedNode?.type === 'people',
-                                   'text-amber-400':   nexusSelectedNode?.type === 'organizations'
-                               }"
-                               x-text="nexusSelectedNode?.type">
-                            </p>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2 flex-shrink-0">
-                        <template x-if="nexusSelectedNode?.type === 'report'">
-                            <button @click="viewMode = 'entries'; selectItem(nexusSelectedNode.id); nexusSelectedNode = null"
-                                    class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded-lg transition-all">
-                                Open Report <i class="fa-solid fa-arrow-right text-[9px]"></i>
-                            </button>
-                        </template>
-                        <button @click="nexusSelectedNode = null"
-                                class="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-all">
-                            <i class="fa-solid fa-xmark text-xs"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Zoom controls (bottom right) -->
-                <div class="absolute bottom-20 md:bottom-6 right-3 md:right-6 z-20 flex flex-col gap-2">
-                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoom(NEXUS_ENGINE.zoom() * 1.5, 300)"
-                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all font-bold shadow-lg text-base leading-none">
-                        +
-                    </button>
-                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoom(NEXUS_ENGINE.zoom() / 1.5, 300)"
-                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all font-bold shadow-lg text-base leading-none">
-                        −
-                    </button>
-                    <button @click="NEXUS_ENGINE && NEXUS_ENGINE.zoomToFit(400)"
-                            title="Fit view"
-                            class="w-9 h-9 flex items-center justify-center bg-slate-900/80 backdrop-blur border border-slate-700 rounded-xl text-slate-400 hover:text-white hover:border-indigo-500 transition-all shadow-lg">
-                        <i class="fa-solid fa-compress text-xs"></i>
-                    </button>
-                </div>
-
-                <div id="nexus-canvas" class="h-full w-full"></div>
-            </div>
-
-            <!-- ── Usage view ────────────────────────────────────────────── -->
-            <template x-if="viewMode === 'usage'">
-                <div class="flex-1 overflow-y-auto custom-scrollbar pb-14 md:pb-0">
-                    <div class="max-w-4xl mx-auto px-4 md:px-8 py-6 md:py-10">
-
-                        <!-- Header -->
-                        <div class="flex items-center justify-between mb-8">
-                            <div>
-                                <h1 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight">API Usage</h1>
-                                <p class="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">Gemini API — today's consumption vs. free-tier limits</p>
-                            </div>
-                            <button @click="loadUsage()"
-                                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-all border border-slate-200 dark:border-slate-800">
-                                <i class="fa-solid fa-rotate text-[9px]" :class="usageLoading && 'animate-spin'"></i>
-                                Refresh
-                            </button>
-                        </div>
-
-                        <!-- Loading -->
-                        <template x-if="usageLoading">
-                            <div class="space-y-4 animate-pulse">
-                                <div class="h-28 bg-slate-100 dark:bg-slate-800 rounded-2xl"></div>
-                                <div class="h-28 bg-slate-100 dark:bg-slate-800 rounded-2xl"></div>
-                            </div>
-                        </template>
-
-                        <template x-if="!usageLoading && usageData">
-                            <div>
-
-                            <!-- ── Today's KPIs ── -->
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Requests today</span>
-                                    <span class="text-3xl font-black text-slate-800 dark:text-slate-100" x-text="(usageData.today.total_requests || 0).toLocaleString()"></span>
-                                    <span class="text-[9px] text-slate-400 font-mono" x-text="'of ' + (usageData.limits?.rpd || 1500).toLocaleString() + ' limit'"></span>
-                                </div>
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Tokens today</span>
-                                    <span class="text-3xl font-black text-indigo-500" x-text="(usageData.today.total_tokens || 0).toLocaleString()"></span>
-                                    <span class="text-[9px] text-slate-400 font-mono">of 1M limit</span>
-                                </div>
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Generate calls</span>
-                                    <span class="text-3xl font-black text-purple-500" x-text="(usageData.today.generate_requests || 0)"></span>
-                                    <span class="text-[9px] text-slate-400 font-mono" x-text="(usageData.today.generate_tokens || 0).toLocaleString() + ' tokens'"></span>
-                                </div>
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Embed calls</span>
-                                    <span class="text-3xl font-black text-teal-500" x-text="(usageData.today.embed_requests || 0)"></span>
-                                    <span class="text-[9px] text-slate-400 font-mono" x-text="(usageData.today.embed_tokens || 0).toLocaleString() + ' tokens'"></span>
-                                </div>
-                            </div>
-
-                            <!-- ── Progress bars ── -->
-                            <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 mb-6 space-y-5">
-                                <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Daily Limits (Free Tier)</h2>
-
-                                <!-- Requests / day -->
-                                <div>
-                                    <div class="flex justify-between items-baseline mb-2">
-                                        <span class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Requests / day</span>
-                                        <span class="text-[10px] font-mono text-slate-500"
-                                              x-text="(usageData.today.total_requests || 0) + ' / ' + (usageData.limits?.rpd || 1500)"></span>
-                                    </div>
-                                    <div class="h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                        <div class="h-full rounded-full transition-all duration-700"
-                                             :class="(usageData.today.total_requests / (usageData.limits?.rpd || 1500)) > 0.85 ? 'bg-rose-500' : 'bg-indigo-500'"
-                                             :style="'width:' + Math.min(100, Math.round((usageData.today.total_requests || 0) / (usageData.limits?.rpd || 1500) * 100)) + '%'"></div>
-                                    </div>
-                                    <span class="text-[9px] font-mono text-slate-400 mt-1 block"
-                                          x-text="Math.min(100, Math.round((usageData.today.total_requests || 0) / (usageData.limits?.rpd || 1500) * 100)) + '% used'"></span>
-                                </div>
-
-                                <!-- Tokens / day -->
-                                <div>
-                                    <div class="flex justify-between items-baseline mb-2">
-                                        <span class="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Tokens / day</span>
-                                        <span class="text-[10px] font-mono text-slate-500"
-                                              x-text="(usageData.today.total_tokens || 0).toLocaleString() + ' / 1,000,000'"></span>
-                                    </div>
-                                    <div class="h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                        <div class="h-full rounded-full transition-all duration-700"
-                                             :class="(usageData.today.total_tokens / 1000000) > 0.85 ? 'bg-rose-500' : 'bg-purple-500'"
-                                             :style="'width:' + Math.min(100, Math.round((usageData.today.total_tokens || 0) / 1000000 * 100)) + '%'"></div>
-                                    </div>
-                                    <span class="text-[9px] font-mono text-slate-400 mt-1 block"
-                                          x-text="Math.min(100, Math.round((usageData.today.total_tokens || 0) / 1000000 * 100)) + '% used'"></span>
-                                </div>
-                            </div>
-
-                            <!-- ── Source breakdown + 7-day chart ── -->
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-
-                                <!-- Source breakdown -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-5">Source breakdown</h2>
-                                    <div class="space-y-3">
-                                        <template x-for="[src, stats] in Object.entries(usageData.source_breakdown || {})" :key="src">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 capitalize" x-text="src.replace(/_/g,' ')"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400" x-text="stats.requests + ' req · ' + (stats.tokens || 0).toLocaleString() + ' tok'"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-indigo-500 rounded-full"
-                                                         :style="'width:' + Math.round(stats.requests / Math.max(...Object.values(usageData.source_breakdown).map(s => s.requests)) * 100) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                        <template x-if="Object.keys(usageData.source_breakdown || {}).length === 0">
-                                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No calls logged yet today</p>
-                                        </template>
-                                    </div>
-                                </div>
-
-                                <!-- 7-day chart -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 mb-5">Last 7 days</h2>
-                                    <div class="space-y-2">
-                                        <template x-for="day in (usageData.daily || [])" :key="day.date">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[10px] font-mono text-slate-500 dark:text-slate-400 w-14 shrink-0" x-text="day.date"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400 ml-2 shrink-0" x-text="day.requests + ' req'"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
-                                                         :style="'width:' + (day.requests === 0 ? 0 : Math.max(2, Math.round(day.requests / Math.max(...(usageData.daily || []).map(d => d.requests || 0)) * 100))) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-                            </div>
-
-                            </div>
-                        </template>
-
-                        <!-- Empty / error state -->
-                        <template x-if="!usageLoading && !usageData">
-                            <div class="flex flex-col items-center justify-center gap-4 py-20 text-center">
-                                <i class="fa-solid fa-gauge-high text-4xl text-slate-200 dark:text-slate-800"></i>
-                                <p class="text-xs font-mono text-slate-400">Could not load usage data — run python manage.py migrate first</p>
-                            </div>
-                        </template>
-
-                    </div>
-                </div>
-            </template>
-
-            <!-- ── Insights view ──────────────────────────────────────────── -->
-            <template x-if="viewMode === 'insights'">
-                <div class="flex-1 overflow-y-auto custom-scrollbar pb-14 md:pb-0">
-                    <div class="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-10">
-                        <!-- Header -->
-                        <div class="flex items-center justify-between mb-8">
-                            <div>
-                                <h1 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight">Insights</h1>
-                                <p class="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">Top entities across the entire archive</p>
-                            </div>
-                            <button @click="insightsData = null; loadInsights()"
-                                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 dark:hover:bg-slate-800 transition-all border border-slate-200 dark:border-slate-800">
-                                <i class="fa-solid fa-rotate text-[9px]" :class="insightsLoading && 'animate-spin'"></i>
-                                Refresh
-                            </button>
-                        </div>
-
-                        <!-- Loading skeleton -->
-                        <template x-if="insightsLoading">
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <template x-for="n in [1,2,3]" :key="n">
-                                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 space-y-3 animate-pulse">
-                                        <div class="h-4 w-1/3 bg-slate-200 dark:bg-slate-800 rounded"></div>
-                                        <template x-for="i in [1,2,3,4,5]" :key="i">
-                                            <div class="space-y-1">
-                                                <div class="h-3 w-2/3 bg-slate-100 dark:bg-slate-800/60 rounded"></div>
-                                                <div class="h-2 w-full bg-slate-100 dark:bg-slate-800/40 rounded-full"></div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </template>
-                            </div>
-                        </template>
-
-                        <!-- Charts -->
-                        <template x-if="!insightsLoading && insightsData">
-                            <div>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-                                <!-- People -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <div class="flex items-center gap-2 mb-5">
-                                        <span class="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                                            <i class="fa-solid fa-user text-blue-500 text-xs"></i>
-                                        </span>
-                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">People</h2>
-                                        <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.people || []).length + ' entities'"></span>
-                                    </div>
-                                    <template x-if="(insightsData.people || []).length === 0">
-                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
-                                    </template>
-                                    <div class="space-y-2.5">
-                                        <template x-for="(item, idx) in (insightsData.people || [])" :key="item.name">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-blue-500 rounded-full transition-all duration-700"
-                                                         :style="'width:' + Math.round(item.count / insightsData.people[0].count * 100) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-
-                                <!-- Locations -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <div class="flex items-center gap-2 mb-5">
-                                        <span class="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                                            <i class="fa-solid fa-location-dot text-emerald-500 text-xs"></i>
-                                        </span>
-                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Locations</h2>
-                                        <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.locations || []).length + ' entities'"></span>
-                                    </div>
-                                    <template x-if="(insightsData.locations || []).length === 0">
-                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
-                                    </template>
-                                    <div class="space-y-2.5">
-                                        <template x-for="(item, idx) in (insightsData.locations || [])" :key="item.name">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
-                                                         :style="'width:' + Math.round(item.count / insightsData.locations[0].count * 100) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-
-                                <!-- Organizations -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <div class="flex items-center gap-2 mb-5">
-                                        <span class="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center">
-                                            <i class="fa-solid fa-building text-amber-500 text-xs"></i>
-                                        </span>
-                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Organizations</h2>
-                                        <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.organizations || []).length + ' entities'"></span>
-                                    </div>
-                                    <template x-if="(insightsData.organizations || []).length === 0">
-                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
-                                    </template>
-                                    <div class="space-y-2.5">
-                                        <template x-for="(item, idx) in (insightsData.organizations || [])" :key="item.name">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-amber-500 rounded-full transition-all duration-700"
-                                                         :style="'width:' + Math.round(item.count / insightsData.organizations[0].count * 100) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-
-                            </div>
-
-                            <!-- ── Archive health ──────────────────── -->
-                            <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Total records</span>
-                                    <span class="text-2xl font-black text-slate-800 dark:text-slate-100" x-text="(insightsData.health?.total || 0).toLocaleString()"></span>
-                                </div>
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Entity coverage</span>
-                                    <span class="text-2xl font-black text-emerald-500" x-text="(insightsData.health?.entities_pct || 0) + '%'"></span>
-                                    <span class="text-[9px] text-slate-400" x-text="(insightsData.health?.with_entities || 0).toLocaleString() + ' docs'"></span>
-                                </div>
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Vector coverage</span>
-                                    <span class="text-2xl font-black text-indigo-500" x-text="(insightsData.health?.embeddings_pct || 0) + '%'"></span>
-                                    <span class="text-[9px] text-slate-400" x-text="(insightsData.health?.with_embeddings || 0).toLocaleString() + ' docs'"></span>
-                                </div>
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
-                                    <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Unique entities</span>
-                                    <span class="text-2xl font-black text-amber-500"
-                                          x-text="((insightsData.people?.length || 0) + (insightsData.locations?.length || 0) + (insightsData.organizations?.length || 0))"></span>
-                                    <span class="text-[9px] text-slate-400">top tracked</span>
-                                </div>
-                            </div>
-
-                            <!-- ── Volume over time + Category breakdown ──── -->
-                            <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-
-                                <!-- Volume over time -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <div class="flex items-center gap-2 mb-5">
-                                        <span class="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center">
-                                            <i class="fa-solid fa-chart-line text-indigo-500 text-xs"></i>
-                                        </span>
-                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Volume over time</h2>
-                                    </div>
-                                    <template x-if="(insightsData.monthly_volume || []).length === 0">
-                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No date data</p>
-                                    </template>
-                                    <div class="space-y-2">
-                                        <template x-for="item in (insightsData.monthly_volume || [])" :key="item.month">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[10px] font-mono text-slate-500 dark:text-slate-400 w-20 shrink-0" x-text="item.month"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400 ml-2 shrink-0" x-text="item.count"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-indigo-500 rounded-full transition-all duration-700"
-                                                         :style="'width:' + Math.round(item.count / Math.max(...(insightsData.monthly_volume || [{}]).map(x => x.count || 0)) * 100) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-
-                                <!-- Category breakdown -->
-                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                    <div class="flex items-center gap-2 mb-5">
-                                        <span class="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                                            <i class="fa-solid fa-layer-group text-purple-500 text-xs"></i>
-                                        </span>
-                                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Categories</h2>
-                                    </div>
-                                    <template x-if="(insightsData.categories || []).length === 0">
-                                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No category data</p>
-                                    </template>
-                                    <div class="space-y-2.5">
-                                        <template x-for="item in (insightsData.categories || [])" :key="item.name">
-                                            <div>
-                                                <div class="flex justify-between items-baseline mb-1">
-                                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2 capitalize" x-text="item.name.replace(/_/g,' ')"></span>
-                                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
-                                                </div>
-                                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                    <div class="h-full bg-purple-500 rounded-full transition-all duration-700"
-                                                         :style="'width:' + Math.round(item.count / (insightsData.categories[0]?.count || 1) * 100) + '%'"></div>
-                                                </div>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- ── Playlist distribution ──────────────────── -->
-                            <div class="mt-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
-                                <div class="flex items-center gap-2 mb-5">
-                                    <span class="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center">
-                                        <i class="fa-solid fa-list-ul text-teal-500 text-xs"></i>
-                                    </span>
-                                    <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Playlist distribution</h2>
-                                </div>
-                                <template x-if="(insightsData.playlists || []).length === 0">
-                                    <p class="text-[10px] text-slate-400 font-mono text-center py-4">No playlist data</p>
-                                </template>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
-                                    <template x-for="item in (insightsData.playlists || [])" :key="item.name">
-                                        <div>
-                                            <div class="flex justify-between items-baseline mb-1">
-                                                <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
-                                                <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
-                                            </div>
-                                            <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                                                <div class="h-full bg-teal-500 rounded-full transition-all duration-700"
-                                                     :style="'width:' + Math.round(item.count / (insightsData.playlists[0]?.count || 1) * 100) + '%'"></div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-
-                            </div><!-- /single-root wrapper -->
-                        </template>
-
-                        <!-- Empty state (no data, not loading) -->
-                        <template x-if="!insightsLoading && !insightsData">
-                            <div class="flex flex-col items-center justify-center gap-4 py-20 text-center">
-                                <i class="fa-solid fa-chart-bar text-4xl text-slate-200 dark:text-slate-800"></i>
-                                <p class="text-xs font-mono text-slate-400">Click Refresh to load entity data</p>
-                            </div>
-                        </template>
-                    </div>
-                </div>
-            </template>
-
-            <template x-if="viewMode === 'entries' && !activeItem">
-                <div class="h-full flex flex-col items-center justify-center gap-5 pb-14 md:pb-0">
-                    <div class="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800/60 flex items-center justify-center">
-                        <i class="fa-solid fa-file-lines text-2xl text-slate-300 dark:text-slate-700"></i>
-                    </div>
-                    <div class="text-center space-y-1">
-                        <p class="text-[11px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-[0.2em]">No Entry Selected</p>
-                        <p class="text-[10px] font-mono text-slate-300 dark:text-slate-800">Pick a report from the sidebar</p>
-                    </div>
-                </div>
-            </template>
+        {% include "partials/dash_sidebar.html" %}
+
+        <main class="flex-1 overflow-y-auto bg-white dark:bg-slate-950 custom-scrollbar relative transition-colors duration-300"
+              @scroll.passive="onMainScroll($event)"
+              aria-label="Main content">
+            {% include "partials/dash_view_chat.html" %}
+            {% include "partials/dash_view_stacks.html" %}
+            {% include "partials/dash_view_entries.html" %}
+            {% include "partials/dash_view_command.html" %}
+            {% include "partials/dash_view_nexus.html" %}
+            {% include "partials/dash_view_usage.html" %}
+            {% include "partials/dash_view_insights.html" %}
+            {% include "partials/dash_view_stocks_tab.html" %}
+            {% include "partials/dash_view_feeds.html" %}
         </main>
     </div>
 
     <!-- Mobile bottom navigation -->
-    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 flex items-stretch">
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-800 flex items-stretch pb-[env(safe-area-inset-bottom)]" aria-label="Mobile navigation">
         <button @click="viewMode = 'stacks'; selectedPlaylistId = null"
                 :class="viewMode === 'stacks' || viewMode === 'entries' ? 'text-indigo-400' : 'text-slate-600'"
-                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
-            <i class="fa-solid fa-layer-group text-[15px]"></i>
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="(viewMode === 'stacks' || viewMode === 'entries') ? 'page' : 'false'">
+            <i class="fa-solid fa-layer-group text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Stacks</span>
         </button>
         <button @click="viewMode = 'chat'"
                 :class="viewMode === 'chat' ? 'text-indigo-400' : 'text-slate-600'"
-                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
-            <i class="fa-solid fa-bolt-lightning text-[15px]"></i>
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'chat' ? 'page' : 'false'">
+            <i class="fa-solid fa-bolt-lightning text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Intel</span>
         </button>
         <button @click="viewMode = 'nexus'; initNexusGraph()"
                 :class="viewMode === 'nexus' ? 'text-indigo-400' : 'text-slate-600'"
-                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
-            <i class="fa-solid fa-circle-nodes text-[15px]"></i>
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'nexus' ? 'page' : 'false'">
+            <i class="fa-solid fa-circle-nodes text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Nexus</span>
         </button>
         <button @click="viewMode = 'insights'; loadInsights()"
                 :class="viewMode === 'insights' ? 'text-indigo-400' : 'text-slate-600'"
-                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
-            <i class="fa-solid fa-chart-bar text-[15px]"></i>
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'insights' ? 'page' : 'false'">
+            <i class="fa-solid fa-chart-bar text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Insights</span>
         </button>
         <button @click="viewMode = 'usage'; loadUsage()"
                 :class="viewMode === 'usage' ? 'text-indigo-400' : 'text-slate-600'"
-                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
-            <i class="fa-solid fa-gauge-high text-[15px]"></i>
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'usage' ? 'page' : 'false'">
+            <i class="fa-solid fa-gauge-high text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Usage</span>
+        </button>
+        <button @click="viewMode = 'stocks_tab'; loadStocks()"
+                :class="viewMode === 'stocks_tab' ? 'text-indigo-400' : 'text-slate-600'"
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'stocks_tab' ? 'page' : 'false'">
+            <i class="fa-solid fa-chart-line text-[15px]" aria-hidden="true"></i>
+            <span class="text-[7px] font-black uppercase tracking-wider">Stocks</span>
+        </button>
+        <button x-show="feeds.length" @click="viewMode = 'feeds'; activeFeedKey = null"
+                :class="viewMode === 'feeds' ? 'text-indigo-400' : 'text-slate-600'"
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'feeds' ? 'page' : 'false'">
+            <i class="fa-solid fa-rss text-[15px]" aria-hidden="true"></i>
+            <span class="text-[7px] font-black uppercase tracking-wider">Feeds</span>
         </button>
         {% if user.is_superuser %}
         <button @click="viewMode = 'command'"
                 :class="viewMode === 'command' ? 'text-indigo-400' : 'text-slate-600'"
-                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800">
-            <i class="fa-solid fa-terminal text-[15px]"></i>
+                class="flex-1 flex flex-col items-center justify-center py-2.5 gap-1 transition-colors active:bg-slate-800"
+                :aria-current="viewMode === 'command' ? 'page' : 'false'">
+            <i class="fa-solid fa-terminal text-[15px]" aria-hidden="true"></i>
             <span class="text-[7px] font-black uppercase tracking-wider">Cmd</span>
         </button>
         {% endif %}

@@ -20,6 +20,7 @@ def run_pipeline_job(task_key, cron_job_id):
 
 
 def run_endpoint_job(endpoint_url, cron_job_id):
+    import os
     from tasks.models import CronJob
     from django.utils import timezone
     from django.test import RequestFactory
@@ -27,7 +28,11 @@ def run_endpoint_job(endpoint_url, cron_job_id):
     logging.info(f"Cron: dispatching internal endpoint {endpoint_url}")
     try:
         factory = RequestFactory()
-        request = factory.post(endpoint_url)
+        extra = {}
+        task_secret = os.getenv('TASK_SECRET', '')
+        if task_secret:
+            extra['HTTP_X_TASK_SECRET'] = task_secret
+        request = factory.post(endpoint_url, **extra)
         try:
             view_func, args, kwargs = resolve(endpoint_url)
         except Resolver404:

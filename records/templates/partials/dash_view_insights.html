@@ -1,0 +1,245 @@
+<template x-if="viewMode === 'insights'">
+    <div class="flex-1 overflow-y-auto custom-scrollbar pb-24 md:pb-0">
+        <div class="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-10">
+
+            <div class="flex items-center justify-between mb-8">
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight">Insights</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-500 mt-1 font-mono">Top entities across the entire archive</p>
+                </div>
+                <button @click="insightsData = null; loadInsights()"
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-500 hover:text-slate-200 hover:bg-slate-800 dark:hover:bg-slate-800 transition-all border border-slate-200 dark:border-slate-800"
+                        aria-label="Refresh insights data">
+                    <i class="fa-solid fa-rotate text-[9px]" :class="insightsLoading && 'animate-spin'" aria-hidden="true"></i>
+                    Refresh
+                </button>
+            </div>
+
+            <!-- Loading skeleton -->
+            <template x-if="insightsLoading">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6" role="status" aria-label="Loading insights">
+                    <template x-for="n in [1,2,3]" :key="n">
+                        <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5 space-y-3 animate-pulse">
+                            <div class="h-4 w-1/3 bg-slate-200 dark:bg-slate-800 rounded"></div>
+                            <template x-for="i in [1,2,3,4,5]" :key="i">
+                                <div class="space-y-1">
+                                    <div class="h-3 w-2/3 bg-slate-100 dark:bg-slate-800/60 rounded"></div>
+                                    <div class="h-2 w-full bg-slate-100 dark:bg-slate-800/40 rounded-full"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- Charts -->
+            <template x-if="!insightsLoading && insightsData">
+                <div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                    <!-- People -->
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                        <div class="flex items-center gap-2 mb-5">
+                            <span class="w-7 h-7 rounded-lg bg-blue-500/10 flex items-center justify-center" aria-hidden="true">
+                                <i class="fa-solid fa-user text-blue-500 text-xs" aria-hidden="true"></i>
+                            </span>
+                            <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">People</h2>
+                            <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.people || []).length + ' entities'"></span>
+                        </div>
+                        <template x-if="(insightsData.people || []).length === 0">
+                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
+                        </template>
+                        <div class="space-y-2.5">
+                            <template x-for="(item, idx) in (insightsData.people || [])" :key="item.name">
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-1">
+                                        <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                        <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                    </div>
+                                    <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full bg-blue-500 rounded-full transition-all duration-700"
+                                             :style="'width:' + Math.round(item.count / insightsData.people[0].count * 100) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Locations -->
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                        <div class="flex items-center gap-2 mb-5">
+                            <span class="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center" aria-hidden="true">
+                                <i class="fa-solid fa-location-dot text-emerald-500 text-xs" aria-hidden="true"></i>
+                            </span>
+                            <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Locations</h2>
+                            <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.locations || []).length + ' entities'"></span>
+                        </div>
+                        <template x-if="(insightsData.locations || []).length === 0">
+                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
+                        </template>
+                        <div class="space-y-2.5">
+                            <template x-for="(item, idx) in (insightsData.locations || [])" :key="item.name">
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-1">
+                                        <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                        <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                    </div>
+                                    <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                                             :style="'width:' + Math.round(item.count / insightsData.locations[0].count * 100) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Organizations -->
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                        <div class="flex items-center gap-2 mb-5">
+                            <span class="w-7 h-7 rounded-lg bg-amber-500/10 flex items-center justify-center" aria-hidden="true">
+                                <i class="fa-solid fa-building text-amber-500 text-xs" aria-hidden="true"></i>
+                            </span>
+                            <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Organizations</h2>
+                            <span class="ml-auto text-[9px] font-mono text-slate-400" x-text="(insightsData.organizations || []).length + ' entities'"></span>
+                        </div>
+                        <template x-if="(insightsData.organizations || []).length === 0">
+                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No data yet</p>
+                        </template>
+                        <div class="space-y-2.5">
+                            <template x-for="(item, idx) in (insightsData.organizations || [])" :key="item.name">
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-1">
+                                        <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                        <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                    </div>
+                                    <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full bg-amber-500 rounded-full transition-all duration-700"
+                                             :style="'width:' + Math.round(item.count / insightsData.organizations[0].count * 100) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Archive health -->
+                <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                        <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Total records</span>
+                        <span class="text-2xl font-black text-slate-800 dark:text-slate-100" x-text="(insightsData.health?.total || 0).toLocaleString()"></span>
+                    </div>
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                        <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Entity coverage</span>
+                        <span class="text-2xl font-black text-emerald-500" x-text="(insightsData.health?.entities_pct || 0) + '%'"></span>
+                        <span class="text-[9px] text-slate-400" x-text="(insightsData.health?.with_entities || 0).toLocaleString() + ' docs'"></span>
+                    </div>
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                        <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Vector coverage</span>
+                        <span class="text-2xl font-black text-indigo-500" x-text="(insightsData.health?.embeddings_pct || 0) + '%'"></span>
+                        <span class="text-[9px] text-slate-400" x-text="(insightsData.health?.with_embeddings || 0).toLocaleString() + ' docs'"></span>
+                    </div>
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col gap-1">
+                        <span class="text-[9px] font-mono uppercase tracking-widest text-slate-400">Unique entities</span>
+                        <span class="text-2xl font-black text-amber-500"
+                              x-text="((insightsData.people?.length || 0) + (insightsData.locations?.length || 0) + (insightsData.organizations?.length || 0))"></span>
+                        <span class="text-[9px] text-slate-400">top tracked</span>
+                    </div>
+                </div>
+
+                <!-- Volume over time + Category breakdown -->
+                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                        <div class="flex items-center gap-2 mb-5">
+                            <span class="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center" aria-hidden="true">
+                                <i class="fa-solid fa-chart-line text-indigo-500 text-xs" aria-hidden="true"></i>
+                            </span>
+                            <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Volume over time</h2>
+                        </div>
+                        <template x-if="(insightsData.monthly_volume || []).length === 0">
+                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No date data</p>
+                        </template>
+                        <div class="space-y-2">
+                            <template x-for="item in (insightsData.monthly_volume || [])" :key="item.month">
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-1">
+                                        <span class="text-[10px] font-mono text-slate-500 dark:text-slate-400 w-20 shrink-0" x-text="item.month"></span>
+                                        <span class="text-[9px] font-mono text-slate-400 ml-2 shrink-0" x-text="item.count"></span>
+                                    </div>
+                                    <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full bg-indigo-500 rounded-full transition-all duration-700"
+                                             :style="'width:' + Math.round(item.count / Math.max(...(insightsData.monthly_volume || [{}]).map(x => x.count || 0)) * 100) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                        <div class="flex items-center gap-2 mb-5">
+                            <span class="w-7 h-7 rounded-lg bg-purple-500/10 flex items-center justify-center" aria-hidden="true">
+                                <i class="fa-solid fa-layer-group text-purple-500 text-xs" aria-hidden="true"></i>
+                            </span>
+                            <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Categories</h2>
+                        </div>
+                        <template x-if="(insightsData.categories || []).length === 0">
+                            <p class="text-[10px] text-slate-400 font-mono text-center py-4">No category data</p>
+                        </template>
+                        <div class="space-y-2.5">
+                            <template x-for="item in (insightsData.categories || [])" :key="item.name">
+                                <div>
+                                    <div class="flex justify-between items-baseline mb-1">
+                                        <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2 capitalize" x-text="item.name.replace(/_/g,' ')"></span>
+                                        <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                    </div>
+                                    <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                        <div class="h-full bg-purple-500 rounded-full transition-all duration-700"
+                                             :style="'width:' + Math.round(item.count / (insightsData.categories[0]?.count || 1) * 100) + '%'"></div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Playlist distribution -->
+                <div class="mt-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                    <div class="flex items-center gap-2 mb-5">
+                        <span class="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center" aria-hidden="true">
+                            <i class="fa-solid fa-list-ul text-teal-500 text-xs" aria-hidden="true"></i>
+                        </span>
+                        <h2 class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Playlist distribution</h2>
+                    </div>
+                    <template x-if="(insightsData.playlists || []).length === 0">
+                        <p class="text-[10px] text-slate-400 font-mono text-center py-4">No playlist data</p>
+                    </template>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2.5">
+                        <template x-for="item in (insightsData.playlists || [])" :key="item.name">
+                            <div>
+                                <div class="flex justify-between items-baseline mb-1">
+                                    <span class="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate mr-2" x-text="item.name"></span>
+                                    <span class="text-[9px] font-mono text-slate-400 shrink-0" x-text="item.count"></span>
+                                </div>
+                                <div class="h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                                    <div class="h-full bg-teal-500 rounded-full transition-all duration-700"
+                                         :style="'width:' + Math.round(item.count / (insightsData.playlists[0]?.count || 1) * 100) + '%'"></div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                </div>
+            </template>
+
+            <!-- Empty state -->
+            <template x-if="!insightsLoading && !insightsData">
+                <div class="flex flex-col items-center justify-center gap-4 py-20 text-center">
+                    <i class="fa-solid fa-chart-bar text-4xl text-slate-200 dark:text-slate-800" aria-hidden="true"></i>
+                    <p class="text-xs font-mono text-slate-400">Click Refresh to load entity data</p>
+                </div>
+            </template>
+        </div>
+    </div>
+</template>

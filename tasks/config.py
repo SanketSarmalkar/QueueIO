@@ -161,21 +161,22 @@ MONGO_CLIENT = None  # use _get_mongo_db() directly if needed
 MONGO_COLLECTIONS = {key: MONGO_DB[config['collection']] for key, config in TASK_CONFIGS.items()}
 EXTRA_DOCUMENT_ARGS = json.loads(os.getenv('EXTRA_DOCUMENT_ARGS', '{}').replace("'", '"'))
 DOCUMENT = {
-    "category": None, # This will be set to the task key (e.g., "summarize", "extract_action_items", etc.)
-    "key": None, # This will be set to the video ID or a unique identifier for the video
-    "a": None, # This can be used for any additional metadata you want to store (e.g., video title, date, etc.)
-    "value": None, # This will be set to the result of the LLM action (e.g., summary text, list of action items, sentiment analysis result, etc.)
-    "createdat": None # This will be set to the current timestamp when the document is created
-    # You can add more fields here as needed, and they will be populated from EXTRA_DOCUMENT_ARGS if provided
+    "category": None,
+    "key": None,
+    "a": None,
+    "value": None,
+    "createdat": None,
+    "playlist_id": None,
+    "playlist_title": None,
 }
 DOCUMENT_MAP = {
-    "category": "task_key",       # Use the task name
-    "key": "id",                 # Use video['id']
-    "a": "title",                # Use video['title']
-    "value": "llm_result",       # Special flag for AI output
-    "createdat": "timestamp",     # Special flag for current time
-    "playlist": "playlist_id", # Use video['playlist_id'] if available
-    "playlist_title": "playlist_title" # Use video['playlist_title'] if available
+    "category": "task_key",
+    "key": "id",
+    "a": "title",
+    "value": "llm_result",
+    "createdat": "timestamp",
+    "playlist_id": "playlist_id",
+    "playlist_title": "playlist_title",
 }
 
 AI_MODEL = os.getenv('AI_MODEL', 'gemini-3-flash-preview')

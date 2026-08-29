@@ -37,6 +37,35 @@ class CronJob(models.Model):
         return self.name
 
 
+class DashboardFeed(models.Model):
+    """A generic scheduled-LLM feed rendered as its own dashboard tab.
+
+    A superuser defines the prompt + how to render it; a CronJob (endpoint type)
+    hitting /tasks/feed/<key>/ refreshes it on a schedule. The latest response is
+    stored in MongoDB (`dashboard_feeds`) and injected into the dashboard the same
+    way `stacks`/`stocks` data is.
+    """
+    RENDER_MARKDOWN = 'markdown'
+    RENDER_TABLE = 'table'
+    RENDER_CHOICES = [(RENDER_MARKDOWN, 'Markdown'), (RENDER_TABLE, 'Table')]
+
+    key = models.SlugField(max_length=50, unique=True,
+                           help_text="URL-safe id used in the cron endpoint, e.g. market_brief")
+    title = models.CharField(max_length=100, help_text="Tab label shown in the dashboard")
+    icon = models.CharField(max_length=50, default='fa-newspaper',
+                            help_text="Font Awesome class, e.g. fa-newspaper")
+    prompt = models.TextField(help_text="Prompt sent to the LLM on each scheduled run.")
+    render_type = models.CharField(max_length=20, choices=RENDER_CHOICES, default=RENDER_MARKDOWN,
+                                   help_text="markdown = prose; table = LLM returns a JSON array of rows")
+    ai_model = models.CharField(max_length=60, blank=True, default='',
+                                help_text="Optional model override; blank uses the global AI_MODEL")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title
+
+
 class TranscriptCache(models.Model):
     video_id = models.CharField(max_length=50, unique=True, db_index=True)
     transcript = models.TextField()

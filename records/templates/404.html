@@ -1,32 +1,32 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>404 — Queue IO</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .dot-grid {
-            background-image: radial-gradient(#1e293b 1px, transparent 1px);
-            background-size: 28px 28px;
-        }
-    </style>
-</head>
-<body class="bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-6">
-    <div class="text-center max-w-sm">
-        <p class="text-[9px] font-mono text-slate-700 uppercase tracking-[0.4em] mb-3">Error Code</p>
-        <h1 class="text-8xl font-black text-white leading-none mb-1">
-            4<span class="text-indigo-500">0</span>4
-        </h1>
-        <div class="h-[2px] w-12 bg-indigo-500 mx-auto my-6 rounded-full"></div>
-        <p class="text-slate-400 text-xs font-mono uppercase tracking-[0.2em] leading-relaxed mb-8">
-            Sector not found.<br>This route does not exist in the archive.
-        </p>
-        <a href="/"
-           class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white text-[10px] font-black uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-indigo-500/20">
-            <i class="fa-solid fa-chevron-left text-[9px]"></i> Return to Dashboard
-        </a>
-    </div>
-</body>
-</html>
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}404 — Page Not Found · Queuei{% endblock %}
+{% block meta_description %}The page you requested could not be found.{% endblock %}
+
+{% block body_class %}bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-6{% endblock %}
+
+{% block body %}
+<main class="text-center max-w-sm" aria-label="Page not found">
+
+    <p class="text-[9px] font-mono text-slate-700 uppercase tracking-[0.4em] mb-3">Error Code</p>
+
+    <h1 class="text-8xl font-black text-white leading-none mb-1" aria-label="404">
+        4<span class="text-indigo-500">0</span>4
+    </h1>
+
+    <div class="h-[2px] w-12 bg-indigo-500 mx-auto my-6 rounded-full" aria-hidden="true"></div>
+
+    <p class="text-slate-400 text-xs font-mono uppercase tracking-[0.2em] leading-relaxed mb-8">
+        Sector not found.<br>
+        This route does not exist in the archive.
+    </p>
+
+    <a href="/"
+       class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white text-[10px] font-black uppercase tracking-widest px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-indigo-500/20">
+        <i class="fa-solid fa-chevron-left text-[9px]" aria-hidden="true"></i>
+        Return to Dashboard
+    </a>
+
+</main>
+{% endblock %}

@@ -8,12 +8,29 @@ from datetime import datetime
 from google import genai
 import os
 import json
+import time
 from bson import ObjectId
 from django.utils.timezone import now as tz_now
 
 import threading
 from tasks.models import TaskConfiguration, GlobalSetting, CronJob
 from django.contrib.auth.decorators import user_passes_test
+
+# ── Intel Chat rate limiting (per-user, in-memory) ────────────────────────────
+_CHAT_RATE: dict[int, list[float]] = {}
+_CHAT_LIMIT = 20       # max requests
+_CHAT_WINDOW = 3600    # per hour (seconds)
+_CHAT_RATE_LOCK = threading.Lock()
+
+def _check_chat_rate(user_id: int) -> bool:
+    now = time.time()
+    with _CHAT_RATE_LOCK:
+        timestamps = [t for t in _CHAT_RATE.get(user_id, []) if now - t < _CHAT_WINDOW]
+        if len(timestamps) >= _CHAT_LIMIT:
+            return False
+        timestamps.append(now)
+        _CHAT_RATE[user_id] = timestamps
+    return True
 
 KNOWN_SETTINGS = [
     {'key': 'YOUTUBE_PLAYLIST_IDS',  'description': 'Comma-separated YouTube playlist IDs to monitor', 'env_key': 'YOUTUBE_PLAYLIST_IDS'},
@@ -38,9 +55,10 @@ def dashboard(request):
     collection = get_db_collection()
 
     # Stack counts — one aggregation, no full scan
+    # $ifNull handles old docs that stored the ID in "playlist" instead of "playlist_id"
     stack_pipeline = [
         {"$group": {
-            "_id": "$playlist_id",
+            "_id": {"$ifNull": ["$playlist_id", "$playlist"]},
             "count": {"$sum": 1},
             "title": {"$first": "$playlist_title"},
             "thumbnail_key": {"$first": "$key"},
@@ -65,11 +83,48 @@ def dashboard(request):
         'id', 'task_key', 'display_name', 'prompt_template', 'target_collection', 'is_active'
     ))
 
+    # Latest NASDAQ stock scorecard snapshot — injected server-side and rendered
+    # inline in the Stocks tab, the same way `stacks_json` feeds the Stacks view.
+    try:
+        from tasks.config import MONGO_DB
+        stocks_json = MONGO_DB["stock_results"].find_one(
+            {"scored_count": {"$gt": 0}},
+            {"_id": 0, "failed": 0, "createdat": 0},
+            sort=[("createdat", -1)],
+        ) or {}
+    except Exception:
+        stocks_json = {}
+
+    # Generic DashboardFeeds — the "Feeds" tab shows a card per feed; drilling into
+    # one reveals a tab per run (each scheduled run is stored as a new snapshot).
+    feeds_json = []
+    try:
+        from tasks.models import DashboardFeed
+        from tasks.config import MONGO_DB as _MDB
+        feed_coll = _MDB["dashboard_feeds"]
+        for f in DashboardFeed.objects.filter(is_active=True).order_by('title'):
+            runs = list(feed_coll.find(
+                {"feed_key": f.key},
+                {"_id": 0, "createdat": 0, "raw": 0, "feed_key": 0, "title": 0, "icon": 0},
+                sort=[("createdat", -1)],
+            ).limit(_FEED_HISTORY_LIMIT))
+            feeds_json.append({
+                "key": f.key,
+                "title": f.title,
+                "icon": f.icon or "fa-newspaper",
+                "render_type": f.render_type,
+                "runs": runs,  # newest first; empty until the feed has run once
+            })
+    except Exception:
+        feeds_json = []
+
     return render(request, 'dashboard.html', {
         'items_raw': formatted_items,
         'latest_id': formatted_items[0]['id'] if formatted_items else '',
         'tasks_json': tasks_list,
         'stacks_json': stacks_json,
+        'stocks_json': stocks_json,
+        'feeds_json': feeds_json,
         'total_count': total,
         'has_more': 'true' if total > _PAGE_SIZE else 'false',
         'next_offset': _PAGE_SIZE,
@@ -83,7 +138,9 @@ def get_more_records(request):
     collection = get_db_collection()
 
     if playlist_id:
-        mongo_filter = {'playlist_id': playlist_id}
+        _ensure_playlist_index(collection)
+        # Match both new-style (playlist_id) and old-style (playlist) field names
+        mongo_filter = {'$or': [{'playlist_id': playlist_id}, {'playlist': playlist_id}]}
         total = collection.count_documents(mongo_filter)
         records = list(collection.find(mongo_filter, {'value': 0, 'embedding': 0}).sort('createdat', -1).skip(offset).limit(_PAGE_SIZE))
     else:
@@ -95,6 +152,7 @@ def get_more_records(request):
         'items': [_format_record(r) for r in records],
         'has_more': offset + _PAGE_SIZE < total,
         'next_offset': offset + _PAGE_SIZE,
+        'total': total,
     })
 
 @login_required
@@ -232,12 +290,14 @@ def get_report_content(request, report_id):
         "key": report.get('key', ''),
         "date_display": date_display,
         "time_display": time_display,
-        "playlist_id": report.get('playlist_id'),
-        "playlist_title": report.get('playlist_title', ''),
+        "playlist_id": report.get('playlist_id') or report.get('playlist') or None,
+        "playlist_title": report.get('playlist_title') or '',
     })
 
 _PAGE_SIZE = 50
+_FEED_HISTORY_LIMIT = 15  # how many recent runs (tabs) to load per dashboard feed
 _TEXT_INDEX_ENSURED = False
+_PLAYLIST_INDEX_ENSURED = False
 _ENTITY_STATS_CACHE = None
 _ENTITY_STATS_TS = None
 
@@ -278,6 +338,17 @@ def _ensure_text_index(collection):
     except Exception:
         pass
     _TEXT_INDEX_ENSURED = True
+
+def _ensure_playlist_index(collection):
+    global _PLAYLIST_INDEX_ENSURED
+    if _PLAYLIST_INDEX_ENSURED:
+        return
+    try:
+        collection.create_index([("playlist_id", 1)], background=True, name="playlist_id_idx")
+        collection.create_index([("playlist", 1)], background=True, name="playlist_idx")
+    except Exception:
+        pass
+    _PLAYLIST_INDEX_ENSURED = True
 
 @login_required
 def get_entity_stats(request):
@@ -416,6 +487,31 @@ def get_usage_stats(request):
         },
     })
 
+@login_required
+def get_stocks_data(request):
+    """Return the most recent NASDAQ stock-scorecard snapshot for the Stocks tab.
+
+    The heavy analysis runs in the daily 9 AM CronJob and is stored in MongoDB
+    (`stock_results`); this endpoint just serves the latest snapshot.
+    """
+    from tasks.config import MONGO_DB
+
+    try:
+        collection = MONGO_DB["stock_results"]
+        snap = collection.find_one(
+            {"scored_count": {"$gt": 0}},
+            {"_id": 0, "failed": 0, "createdat": 0},
+            sort=[("createdat", -1)],
+        )
+    except Exception as e:
+        return JsonResponse({"error": str(e), "rows": []}, status=200)
+
+    if not snap:
+        return JsonResponse({"empty": True, "rows": []})
+
+    return JsonResponse(snap)
+
+
 def _format_record(item):
     created_at = item.get('createdat')
     date_display = "N/A"
@@ -433,13 +529,15 @@ def _format_record(item):
         'title': (item.get('a') or 'Untitled Record').split('|')[0].strip(),
         'date_display': date_display,
         'time_display': time_display,
-        'playlist_id': item.get('playlist_id', None),
-        'playlist_title': item.get('playlist_title', item.get('playlist_id', 'General Archive')),
+        'playlist_id': item.get('playlist_id') or item.get('playlist') or None,
+        'playlist_title': item.get('playlist_title') or item.get('playlist_id') or item.get('playlist') or 'General Archive',
     }
 
 @login_required
 def intel_chat_view(request):
     if request.method == "POST":
+        if not _check_chat_rate(request.user.id):
+            return JsonResponse({'error': 'Rate limit exceeded. Max 20 queries per hour.'}, status=429)
         try:
             data = json.loads(request.body)
             user_query = data.get('query', '').strip()
@@ -481,7 +579,7 @@ def intel_chat_view(request):
             context_reports = list(collection.aggregate(pipeline))
 
             context_text = "\n\n".join([
-                f"[SOURCE {i+1}] {str(r.get('a',''))} ({r.get('playlist_title','')})\n{r.get('value','')}"
+                f"[SOURCE {i+1}] {r.get('a') or ''} ({r.get('playlist_title') or ''})\n{r.get('value') or ''}"
                 for i, r in enumerate(context_reports)
             ])
 
@@ -513,7 +611,7 @@ ARCHIVE DATA:
                     date_str = created.strftime("%b %d, %Y")
                 sources.append({
                     "id": str(r['_id']),
-                    "title": str(r.get('a', 'Untitled')).split('|')[0].strip(),
+                    "title": (r.get('a') or 'Untitled').split('|')[0].strip(),
                     "playlist_title": r.get('playlist_title', ''),
                     "date": date_str,
                 })
@@ -588,7 +686,7 @@ def get_nexus_graph(request):
         report_id = str(doc['_id'])
         nodes.append({
             "id": report_id,
-            "name": doc.get('a', 'Untitled').split('|')[0].strip(),
+            "name": (doc.get('a') or 'Untitled').split('|')[0].strip(),
             "type": "report",
             "color": "#818cf8", # Brighter Indigo
             "val": 28          # Large anchor node
@@ -750,9 +848,12 @@ def cron_manager_view(request):
     # GET
     jobs = [_serialize_job(j) for j in CronJob.objects.all().order_by('-created_at')]
     task_keys = list(TaskConfiguration.objects.filter(is_active=True).values_list('task_key', flat=True))
+    from tasks.models import DashboardFeed
+    feed_keys = list(DashboardFeed.objects.filter(is_active=True).values_list('key', flat=True))
     return render(request, 'cron_manager.html', {
         'jobs_json': jobs,
         'task_keys_json': task_keys,
+        'feed_keys_json': feed_keys,
     })
 
 

@@ -29,7 +29,9 @@ def backfill_playlist_data(request = None):
             "message": "Failed to connect to MongoDB. Check console for details."
         })
 
-    playlist_ids = os.getenv('YOUTUBE_PLAYLIST_IDS', '').split(',')
+    from tasks.config import get_global_setting
+    playlist_ids_raw = get_global_setting('YOUTUBE_PLAYLIST_IDS', os.getenv('YOUTUBE_PLAYLIST_IDS', ''))
+    playlist_ids = [p.strip() for p in playlist_ids_raw.split(',') if p.strip()]
     ydl_opts = {'extract_flat': True, 'quiet': True}
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

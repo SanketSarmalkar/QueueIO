@@ -3,13 +3,20 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="description" content="Intel Chat — RAG-powered vector search across the Queuei intelligence archive.">
+    <meta property="og:title" content="Intel Chat — Queuei">
     <title>Intel Chat — Queuei</title>
     <link rel="icon" type="image/png" href="{% static 'favicon.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'favicon.png' %}">
     <script src="https://cdn.tailwindcss.com"></script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+          integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=="
+          crossorigin="anonymous" referrerpolicy="no-referrer">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tailwindcss/typography@0.5.10/dist/typography.min.css">
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 5px; }
@@ -22,32 +29,39 @@
     <!-- Header -->
     <header class="h-14 bg-slate-900 flex items-center px-4 md:px-6 justify-between shadow-lg border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
-            <a href="/" class="flex items-center gap-2 md:gap-3">
-                <img src="{% static 'favicon.png' %}" alt="Logo" class="w-9 h-9 rounded-lg object-cover border border-slate-700/50">
+            <a href="/" class="flex items-center gap-2 md:gap-3" aria-label="Queuei — go to dashboard">
+                <img src="{% static 'favicon.png' %}" alt="" class="w-9 h-9 rounded-lg object-cover border border-slate-700/50" aria-hidden="true">
                 <span class="font-black tracking-tighter text-lg uppercase text-white hidden sm:block">Queue <span class="text-indigo-400">IO</span></span>
             </a>
-            <span class="text-slate-700 text-xs hidden sm:block">/</span>
+            <span class="text-slate-700 text-xs hidden sm:block" aria-hidden="true">/</span>
             <span class="text-[10px] font-black uppercase tracking-widest text-indigo-400">Intel Chat</span>
         </div>
         <div class="flex items-center gap-3 md:gap-4">
             <button @click="messages = []"
-                    class="flex items-center gap-1.5 text-slate-600 hover:text-red-400 transition-colors text-[9px] font-bold uppercase tracking-widest">
-                <i class="fa-solid fa-trash-can text-[9px]"></i><span class="hidden sm:inline"> Clear</span>
+                    class="flex items-center gap-1.5 text-slate-600 hover:text-red-400 transition-colors text-[9px] font-bold uppercase tracking-widest"
+                    aria-label="Clear chat history">
+                <i class="fa-solid fa-trash-can text-[9px]" aria-hidden="true"></i>
+                <span class="hidden sm:inline">Clear</span>
             </button>
-            <a href="/" class="flex items-center gap-1.5 text-slate-400 hover:text-white transition-colors text-[10px] font-mono uppercase border-l border-slate-800 pl-3 md:pl-4">
-                <i class="fa-solid fa-arrow-left text-[9px]"></i><span class="hidden sm:inline"> Dashboard</span>
+            <a href="/"
+               class="flex items-center gap-1.5 text-slate-400 hover:text-white transition-colors text-[10px] font-mono uppercase border-l border-slate-800 pl-3 md:pl-4"
+               aria-label="Back to dashboard">
+                <i class="fa-solid fa-arrow-left text-[9px]" aria-hidden="true"></i>
+                <span class="hidden sm:inline">Dashboard</span>
             </a>
         </div>
     </header>
 
     <!-- Messages -->
-    <div id="chat-scroll" class="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-6 py-6 md:py-8 space-y-8 md:space-y-10">
+    <div id="chat-scroll"
+         class="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-6 py-6 md:py-8 space-y-8 md:space-y-10"
+         role="log" aria-label="Chat messages" aria-live="polite">
 
         <!-- Empty state -->
         <template x-if="messages.length === 0">
             <div class="h-full flex flex-col items-center justify-center gap-4 py-24">
-                <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-                    <i class="fa-solid fa-bolt-lightning text-indigo-400 text-xl"></i>
+                <div class="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center" aria-hidden="true">
+                    <i class="fa-solid fa-bolt-lightning text-indigo-400 text-xl" aria-hidden="true"></i>
                 </div>
                 <div class="text-center space-y-1">
                     <p class="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">Intelligence Archive Ready</p>
@@ -67,7 +81,7 @@
                      class="max-w-[85%]">
 
                     <template x-if="msg.role === 'ai'">
-                        <div class="absolute top-0 left-0 w-[3px] h-full bg-indigo-500 rounded-tl-2xl"></div>
+                        <div class="absolute top-0 left-0 w-[3px] h-full bg-indigo-500 rounded-tl-2xl" aria-hidden="true"></div>
                     </template>
 
                     <div class="prose prose-sm prose-invert leading-relaxed" x-html="msg.text"></div>
@@ -75,14 +89,15 @@
                     <template x-if="msg.sources && msg.sources.length > 0">
                         <div class="mt-6 pt-4 border-t border-slate-800">
                             <p class="text-[9px] font-black uppercase tracking-widest text-slate-600 mb-3 flex items-center gap-2">
-                                <i class="fa-solid fa-link text-indigo-500"></i> Sources
+                                <i class="fa-solid fa-link text-indigo-500" aria-hidden="true"></i> Sources
                             </p>
                             <div class="flex flex-wrap gap-2">
-                                <template x-for="src in msg.sources">
+                                <template x-for="src in msg.sources" :key="src.id || src.title">
                                     <a href="/"
-                                       class="bg-indigo-500/8 hover:bg-indigo-500/20 border border-indigo-500/20 px-2.5 py-1.5 rounded-lg text-[9px] font-bold text-indigo-400 transition-all flex items-center gap-1.5">
+                                       class="bg-indigo-500/8 hover:bg-indigo-500/20 border border-indigo-500/20 px-2.5 py-1.5 rounded-lg text-[9px] font-bold text-indigo-400 transition-all flex items-center gap-1.5"
+                                       :aria-label="'Source: ' + src.title">
                                         <span x-text="src.title"></span>
-                                        <i class="fa-solid fa-arrow-up-right-from-square text-[8px] opacity-60"></i>
+                                        <i class="fa-solid fa-arrow-up-right-from-square text-[8px] opacity-60" aria-hidden="true"></i>
                                     </a>
                                 </template>
                             </div>
@@ -93,30 +108,34 @@
         </template>
 
         <!-- Loading -->
-        <div x-show="loading" class="max-w-4xl mx-auto w-full">
+        <div x-show="loading" class="max-w-4xl mx-auto w-full" role="status" aria-label="Loading response">
             <div class="flex items-center gap-3 text-indigo-400 font-mono text-[9px] tracking-[0.3em] animate-pulse">
-                <i class="fa-solid fa-microchip animate-spin"></i>
+                <i class="fa-solid fa-microchip animate-spin" aria-hidden="true"></i>
                 CROSS-REFERENCING ARCHIVE...
             </div>
         </div>
     </div>
 
     <!-- Input bar -->
-    <div class="shrink-0 border-t border-slate-800 bg-slate-900 p-3 md:p-5">
+    <div class="shrink-0 border-t border-slate-800 bg-slate-900 p-3 md:p-5" role="region" aria-label="Message input">
         <div class="max-w-4xl mx-auto relative">
-            <input type="text"
+            <label for="intel-chat-input" class="sr-only">Ask a question about the archive</label>
+            <input id="intel-chat-input"
+                   type="text"
                    x-model="query"
                    @keyup.enter.prevent="sendQuery()"
                    placeholder="Ask about entities, geopolitics, events..."
-                   class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 rounded-2xl py-3 md:py-4 pl-4 md:pl-5 pr-14 md:pr-16 text-sm text-white outline-none transition-all placeholder:text-slate-600">
+                   class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20 rounded-2xl py-3 md:py-4 pl-4 md:pl-5 pr-14 md:pr-16 text-sm text-white outline-none transition-all placeholder:text-slate-600"
+                   autocomplete="off">
             <button @click="sendQuery()"
                     :disabled="loading || !query.trim()"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center">
-                <i class="fa-solid fa-bolt-lightning text-xs"></i>
+                    class="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white w-10 h-10 rounded-xl transition-all shadow-lg flex items-center justify-center"
+                    aria-label="Send query">
+                <i class="fa-solid fa-bolt-lightning text-xs" aria-hidden="true"></i>
             </button>
         </div>
         <p class="text-center text-[9px] font-mono text-slate-700 mt-2 uppercase tracking-widest">
-            Vector search across {{ "3072" }}-dim embeddings
+            Vector search across 3072-dim embeddings
         </p>
     </div>
 

@@ -1,0 +1,84 @@
+<template x-if="viewMode === 'stacks'">
+    <div class="h-full overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950 pb-24 md:pb-0">
+        <!-- Stats hero -->
+        <div class="border-b border-slate-200 dark:border-slate-800/60 bg-white dark:bg-gradient-to-b dark:from-slate-900 dark:to-slate-950 px-4 md:px-8 py-5 md:py-8">
+            <div class="max-w-7xl mx-auto">
+                <p class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.35em] mb-3">Intelligence Archive</p>
+                <div class="flex items-end justify-between gap-4 flex-wrap">
+                    <h2 class="text-2xl md:text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter leading-none">
+                        Active Stacks
+                    </h2>
+                    <div class="flex items-center gap-4 md:gap-8">
+                        <div class="text-right">
+                            <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-0.5">Total Reports</p>
+                            <p class="text-3xl font-black text-slate-900 dark:text-white tabular-nums" x-text="totalCount.toLocaleString()"></p>
+                        </div>
+                        <div class="w-px h-10 bg-slate-200 dark:bg-slate-800" aria-hidden="true"></div>
+                        <div class="text-right">
+                            <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-0.5">Stacks</p>
+                            <p class="text-3xl font-black text-indigo-500 dark:text-indigo-400 tabular-nums" x-text="stacks.length"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cards grid -->
+        <div class="p-4 md:p-8 max-w-7xl mx-auto">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" role="list" aria-label="Stacks">
+                <template x-for="(stack, idx) in stacks" :key="stack.id">
+                    <div @click="openStack(stack.id)"
+                         class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:border-indigo-400/50 dark:hover:border-slate-600 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:shadow-black/40 hover:-translate-y-1"
+                         role="listitem"
+                         :aria-label="'Open stack: ' + stack.title">
+
+                        <!-- Thumbnail header or accent bar -->
+                        <template x-if="stack.thumbnail_key">
+                            <div class="relative overflow-hidden" style="height: 130px;">
+                                <img :src="`https://i.ytimg.com/vi/${stack.thumbnail_key}/mqdefault.jpg`"
+                                     :alt="stack.title"
+                                     class="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
+                                     loading="lazy">
+                                <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" aria-hidden="true"></div>
+                                <div class="absolute inset-x-0 top-0 h-[3px]" aria-hidden="true"
+                                     :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
+                                </div>
+                            </div>
+                        </template>
+                        <template x-if="!stack.thumbnail_key">
+                            <div class="h-[3px] w-full" aria-hidden="true"
+                                 :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]">
+                            </div>
+                        </template>
+
+                        <div class="p-6">
+                            <!-- Icon + ID row -->
+                            <div class="flex items-center justify-between mb-5">
+                                <div class="w-9 h-9 rounded-lg flex items-center justify-center" aria-hidden="true"
+                                     :class="['bg-indigo-500/10 text-indigo-400','bg-emerald-500/10 text-emerald-400','bg-blue-500/10 text-blue-400','bg-amber-500/10 text-amber-400','bg-rose-500/10 text-rose-400','bg-purple-500/10 text-purple-400'][idx % 6]">
+                                    <i class="fa-solid fa-database text-sm" aria-hidden="true"></i>
+                                </div>
+                                <span class="text-[8px] font-mono text-slate-400 dark:text-slate-700 uppercase tracking-wider truncate max-w-[140px]" x-text="stack.id"></span>
+                            </div>
+
+                            <!-- Stack title -->
+                            <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 leading-snug mb-4 group-hover:text-slate-900 dark:group-hover:text-white transition-colors line-clamp-2" x-text="stack.title"></h3>
+
+                            <!-- Count + arrow -->
+                            <div class="flex items-end justify-between">
+                                <div>
+                                    <p class="text-4xl font-black text-slate-900 dark:text-white tabular-nums leading-none" x-text="stack.count"></p>
+                                    <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase mt-1">Reports</p>
+                                </div>
+                                <span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest translate-x-1 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" aria-hidden="true"
+                                      :class="['text-indigo-400','text-emerald-400','text-blue-400','text-amber-400','text-rose-400','text-purple-400'][idx % 6]">
+                                    Open <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+</template>

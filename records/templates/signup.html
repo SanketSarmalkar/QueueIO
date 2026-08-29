@@ -1,82 +1,94 @@
+{% extends "base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register — Queue IO</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .dot-grid {
-            background-image: radial-gradient(#1e293b 1px, transparent 1px);
-            background-size: 28px 28px;
-        }
-        .help-box ul { list-style: none !important; padding: 0 !important; margin: 0 !important; }
-        .help-box li { display: block; margin-bottom: 2px; }
-        .help-box li::before { content: "› "; color: #6366f1; }
-    </style>
-</head>
-<body class="bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-4">
 
-    <div class="w-full max-w-sm">
-        <!-- Logo -->
-        <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl shadow-indigo-500/20 mb-5">
-                <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-10 h-10 rounded-xl object-cover">
-            </div>
-            <h1 class="text-white text-2xl font-black uppercase tracking-tighter">New <span class="text-indigo-400">Account</span></h1>
-            <p class="text-slate-600 text-[9px] mt-1.5 uppercase tracking-[0.3em] font-mono">Pending supervisor approval</p>
+{% block title %}Create Account — Queuei{% endblock %}
+{% block meta_description %}Register a new Queuei account. Pending supervisor approval.{% endblock %}
+{% block og_title %}Create Account — Queuei{% endblock %}
+
+{% block body_class %}bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-4{% endblock %}
+
+{% block head_extra %}
+<style>
+    .help-box ul { list-style: none !important; padding: 0 !important; margin: 0 !important; }
+    .help-box li { display: block; margin-bottom: 2px; }
+    .help-box li::before { content: "› "; color: #6366f1; }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="w-full max-w-sm" aria-label="Create account">
+
+    <!-- Brand -->
+    <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl shadow-indigo-500/20 mb-5">
+            <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-10 h-10 rounded-xl object-cover">
         </div>
-
-        <!-- Card -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-2xl">
-            <form method="post" class="space-y-4">
-                {% csrf_token %}
-
-                {% for field in form %}
-                <div>
-                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">{{ field.label }}</label>
-                    {{ field }}
-                    {% if field.errors %}
-                        {% for error in field.errors %}
-                        <p class="flex items-center gap-1.5 text-red-400 text-[9px] font-mono uppercase mt-1">
-                            <i class="fa-solid fa-triangle-exclamation"></i> {{ error }}
-                        </p>
-                        {% endfor %}
-                    {% endif %}
-                    {% if field.help_text %}
-                    <div class="bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2 mt-1.5 help-box">
-                        <div class="text-slate-600 text-[9px] leading-relaxed font-mono flex items-start gap-2">
-                            <i class="fa-solid fa-circle-info text-indigo-500/60 mt-0.5 shrink-0"></i>
-                            <div>{{ field.help_text|safe }}</div>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-                {% endfor %}
-
-                <button type="submit"
-                        class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-black py-2.5 rounded-lg transition-all uppercase tracking-widest text-[11px] shadow-lg shadow-indigo-500/20 mt-2">
-                    Create Account
-                </button>
-            </form>
-
-            <p class="text-center mt-5">
-                <a href="{% url 'login' %}"
-                   class="text-slate-600 hover:text-indigo-400 text-[9px] uppercase font-bold tracking-widest transition-colors flex items-center justify-center gap-1.5">
-                    <i class="fa-solid fa-chevron-left text-[8px]"></i> Back to Login
-                </a>
-            </p>
-        </div>
+        <h1 class="text-white text-2xl font-black uppercase tracking-tighter">
+            New <span class="text-indigo-400">Account</span>
+        </h1>
+        <p class="text-slate-600 text-[9px] mt-1.5 uppercase tracking-[0.3em] font-mono">
+            Pending supervisor approval
+        </p>
     </div>
 
-    <script>
-        document.querySelectorAll('input').forEach(input => {
-            if (input.type !== 'hidden') {
-                input.className = "w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600";
-            }
-        });
-    </script>
-</body>
-</html>
+    <!-- Card -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-2xl">
+        <form method="post" class="space-y-4" novalidate>
+            {% csrf_token %}
+
+            {% for field in form %}
+            <div>
+                <label for="{{ field.id_for_label }}"
+                       class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">
+                    {{ field.label }}
+                </label>
+                {{ field }}
+
+                {% if field.errors %}
+                    {% for error in field.errors %}
+                    <p role="alert"
+                       class="flex items-center gap-1.5 text-red-400 text-[9px] font-mono uppercase mt-1">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                        {{ error }}
+                    </p>
+                    {% endfor %}
+                {% endif %}
+
+                {% if field.help_text %}
+                <div class="bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2 mt-1.5 help-box">
+                    <div class="text-slate-600 text-[9px] leading-relaxed font-mono flex items-start gap-2">
+                        <i class="fa-solid fa-circle-info text-indigo-500/60 mt-0.5 shrink-0" aria-hidden="true"></i>
+                        <div>{{ field.help_text|safe }}</div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <button type="submit"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-black py-2.5 rounded-lg transition-all uppercase tracking-widest text-[11px] shadow-lg shadow-indigo-500/20 mt-2">
+                Create Account
+            </button>
+        </form>
+
+        <p class="text-center mt-5">
+            <a href="{% url 'login' %}"
+               class="text-slate-600 hover:text-indigo-400 text-[9px] uppercase font-bold tracking-widest transition-colors flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-chevron-left text-[8px]" aria-hidden="true"></i>
+                Back to Login
+            </a>
+        </p>
+    </div>
+
+</main>
+
+{% block scripts %}
+<script>
+    document.querySelectorAll('input').forEach(input => {
+        if (input.type !== 'hidden') {
+            input.className = "w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg px-3.5 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600";
+        }
+    });
+</script>
+{% endblock %}
+{% endblock %}

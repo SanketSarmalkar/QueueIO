@@ -18,9 +18,9 @@ if [ "$(docker images -q $IMAGE_NAME)" ]; then
     docker rmi -f $IMAGE_NAME
 fi
 
-# 3. Build the new image
+# 3. Build the new image (CACHE_BUST ensures source files are always re-copied)
 echo "Building new image..."
-docker build -t $IMAGE_NAME .
+docker build --build-arg CACHE_BUST=$(date +%s) -t $IMAGE_NAME .
 
 # 4. Run the new container
 echo "Running new container: $CONTAINER_NAME"

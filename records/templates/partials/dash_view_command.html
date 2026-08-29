@@ -1,0 +1,97 @@
+<template x-if="viewMode === 'command'">
+    <div class="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950 p-4 md:p-8 lg:p-12 pb-20 md:pb-8 lg:pb-12 custom-scrollbar">
+        <div class="max-w-5xl mx-auto">
+
+            <div class="flex flex-wrap justify-between items-start gap-4 mb-8 md:mb-10">
+                <div>
+                    <p class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.3em] mb-2">Superuser</p>
+                    <h2 class="text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter leading-none">
+                        Command <span class="text-indigo-500">Center</span>
+                    </h2>
+                </div>
+                <button @click="showNewTaskModal = !showNewTaskModal"
+                        class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black px-5 py-2.5 rounded-xl transition-all shadow-lg uppercase tracking-widest">
+                    <i class="fa-solid" :class="showNewTaskModal ? 'fa-xmark' : 'fa-plus'" aria-hidden="true"></i>
+                    <span x-text="showNewTaskModal ? 'Cancel' : 'New Task'"></span>
+                </button>
+            </div>
+
+            <!-- New task form -->
+            <div x-show="showNewTaskModal" x-transition
+                 class="mb-10 bg-indigo-500/5 border border-dashed border-indigo-500/30 rounded-2xl p-7"
+                 role="region" aria-label="New task form">
+                <p class="text-[9px] font-black text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.25em] mb-6 flex items-center gap-2">
+                    <i class="fa-solid fa-plus" aria-hidden="true"></i> New Intelligence Task
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="space-y-1.5">
+                        <label for="new-task-key" class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Task Key</label>
+                        <input id="new-task-key" x-model="newTask.task_key" type="text" placeholder="e.g. risk_analysis"
+                               class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+                               autocomplete="off">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="new-task-name" class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Display Name</label>
+                        <input id="new-task-name" x-model="newTask.display_name" type="text" placeholder="e.g. Geopolitical Risk"
+                               class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+                               autocomplete="off">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label for="new-task-collection" class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Target Collection</label>
+                        <select id="new-task-collection" x-model="newTask.target_collection"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all">
+                            <option value="mass_records">mass_records</option>
+                            <option value="action_items">action_items</option>
+                            <option value="analytics">analytics</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="space-y-1.5 mb-6">
+                    <label for="new-task-prompt" class="text-[9px] font-black text-slate-500 uppercase tracking-widest block">Prompt Template</label>
+                    <textarea id="new-task-prompt" x-model="newTask.prompt_template" rows="4"
+                              placeholder="Analyze the following for... {transcript}"
+                              class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 font-mono leading-relaxed resize-none transition-all"></textarea>
+                    <p class="text-[9px] text-slate-400 font-mono">Include <code class="text-indigo-500">{transcript}</code> as the placeholder.</p>
+                </div>
+                <button @click="saveTask(newTask, true)"
+                        class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] py-3 rounded-xl text-white font-black uppercase tracking-widest text-[10px] shadow-lg shadow-indigo-600/20 transition-all">
+                    Deploy Task
+                </button>
+            </div>
+
+            <!-- Task cards -->
+            <div class="grid gap-5" role="list" aria-label="Task configurations">
+                <template x-for="task in tasks" :key="task.id">
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm" role="listitem">
+                        <div class="flex justify-between items-start mb-5">
+                            <div>
+                                <h3 class="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight" x-text="task.display_name"></h3>
+                                <div class="flex gap-3 mt-1.5">
+                                    <span class="text-[9px] font-mono text-slate-400 uppercase" x-text="'Key: ' + task.task_key"></span>
+                                    <span class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase" x-text="'→ ' + task.target_collection"></span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700 shrink-0">
+                                <span :class="task.is_active ? 'bg-emerald-500' : 'bg-red-500'" class="w-1.5 h-1.5 rounded-full" aria-hidden="true"></span>
+                                <span class="text-[8px] font-black text-slate-500 dark:text-slate-400 uppercase" x-text="task.is_active ? 'Online' : 'Offline'"></span>
+                            </div>
+                        </div>
+                        <label :for="'task-prompt-' + task.id" class="sr-only" x-text="'Prompt template for ' + task.display_name"></label>
+                        <textarea
+                            :id="'task-prompt-' + task.id"
+                            x-model="task.prompt_template"
+                            class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-xs font-mono text-slate-600 dark:text-slate-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all resize-none"
+                            rows="4"></textarea>
+                        <div class="flex justify-end mt-3">
+                            <button @click="saveTask(task)"
+                                    class="bg-indigo-500/10 hover:bg-indigo-600 text-indigo-600 dark:text-indigo-400 hover:text-white text-[9px] font-black px-5 py-2 rounded-lg border border-indigo-500/20 hover:border-transparent transition-all uppercase tracking-widest"
+                                    :aria-label="'Save changes for ' + task.display_name">
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+</template>

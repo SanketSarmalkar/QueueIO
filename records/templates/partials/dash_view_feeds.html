@@ -1,0 +1,166 @@
+{% comment %}Feeds tab. Landing = a Stacks-style card grid (one card per feed). Drilling into a feed reveals a tab per run — each scheduled job run is stored as a new snapshot.{% endcomment %}
+<template x-if="viewMode === 'feeds'">
+    <div class="h-full overflow-y-auto custom-scrollbar bg-slate-50 dark:bg-slate-950 pb-24 md:pb-0">
+
+        <!-- ============ LANDING: feed card grid ============ -->
+        <template x-if="!activeFeedKey">
+            <div>
+                <!-- Hero -->
+                <div class="border-b border-slate-200 dark:border-slate-800/60 bg-white dark:bg-gradient-to-b dark:from-slate-900 dark:to-slate-950 px-4 md:px-8 py-5 md:py-8">
+                    <div class="max-w-7xl mx-auto">
+                        <p class="text-[9px] font-mono text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.35em] mb-3">Automated Intelligence</p>
+                        <div class="flex items-end justify-between gap-4 flex-wrap">
+                            <h2 class="text-2xl md:text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tighter leading-none">Feeds</h2>
+                            <div class="text-right">
+                                <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-0.5">Feeds</p>
+                                <p class="text-3xl font-black text-indigo-500 dark:text-indigo-400 tabular-nums" x-text="feeds.length"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cards -->
+                <div class="p-4 md:p-8 max-w-7xl mx-auto">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" role="list" aria-label="Feeds">
+                        <template x-for="(f, idx) in feeds" :key="f.key">
+                            <div @click="activeFeedKey = f.key; activeRunIndex = 0"
+                                 class="group relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:border-indigo-400/50 dark:hover:border-slate-600 hover:shadow-xl hover:shadow-indigo-500/5 dark:hover:shadow-black/40 hover:-translate-y-1"
+                                 role="listitem" :aria-label="'Open feed: ' + f.title">
+                                <div class="h-[3px] w-full" aria-hidden="true"
+                                     :class="['bg-indigo-500','bg-emerald-500','bg-blue-500','bg-amber-500','bg-rose-500','bg-purple-500'][idx % 6]"></div>
+                                <div class="p-6">
+                                    <div class="flex items-center justify-between mb-5">
+                                        <div class="w-9 h-9 rounded-lg flex items-center justify-center" aria-hidden="true"
+                                             :class="['bg-indigo-500/10 text-indigo-400','bg-emerald-500/10 text-emerald-400','bg-blue-500/10 text-blue-400','bg-amber-500/10 text-amber-400','bg-rose-500/10 text-rose-400','bg-purple-500/10 text-purple-400'][idx % 6]">
+                                            <i class="fa-solid text-sm" :class="f.icon" aria-hidden="true"></i>
+                                        </div>
+                                        <span class="text-[8px] font-mono text-slate-400 dark:text-slate-500 uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800" x-text="f.render_type"></span>
+                                    </div>
+                                    <h3 class="text-sm font-bold text-slate-700 dark:text-slate-200 leading-snug mb-4 group-hover:text-slate-900 dark:group-hover:text-white transition-colors line-clamp-2" x-text="f.title"></h3>
+                                    <div class="flex items-end justify-between">
+                                        <div>
+                                            <p class="text-4xl font-black text-slate-900 dark:text-white tabular-nums leading-none" x-text="f.runs.length"></p>
+                                            <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 uppercase mt-1" x-text="f.runs.length === 1 ? 'Run' : 'Runs'"></p>
+                                        </div>
+                                        <span class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest translate-x-1 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" aria-hidden="true"
+                                              :class="['text-indigo-400','text-emerald-400','text-blue-400','text-amber-400','text-rose-400','text-purple-400'][idx % 6]">
+                                            Open <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+                                        </span>
+                                    </div>
+                                    <p class="text-[9px] font-mono text-slate-400 dark:text-slate-600 mt-3" x-show="f.runs.length"
+                                       x-text="'latest · ' + (f.runs.length ? new Date(f.runs[0].generated).toLocaleString() : '')"></p>
+                                    <p class="text-[9px] font-mono text-amber-500 mt-3" x-show="!f.runs.length">Not generated yet</p>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <template x-if="!feeds.length">
+                        <div class="text-center py-24">
+                            <i class="fa-solid fa-rss text-4xl text-slate-300 dark:text-slate-700 mb-4" aria-hidden="true"></i>
+                            <p class="text-sm font-bold text-slate-500 dark:text-slate-400">No feeds configured</p>
+                            <p class="text-xs text-slate-400 dark:text-slate-600 mt-1 font-mono">Add one in the admin (Dashboard feeds), then schedule it in the Command Center.</p>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </template>
+
+        <!-- ============ DETAIL: a feed's runs (one tab per run) ============ -->
+        <template x-if="activeFeedKey">
+            <div class="max-w-4xl mx-auto px-4 md:px-8 py-6 md:py-10">
+                <button @click="activeFeedKey = null"
+                        class="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-slate-500 hover:text-indigo-500 mb-6 transition-colors">
+                    <i class="fa-solid fa-arrow-left text-[10px]" aria-hidden="true"></i> All feeds
+                </button>
+
+                <template x-for="f in feeds" :key="f.key">
+                    <div x-show="activeFeedKey === f.key">
+                        <!-- Feed header -->
+                        <div class="mb-6">
+                            <h1 class="text-2xl md:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-3">
+                                <i class="fa-solid text-xl text-indigo-500" :class="f.icon" aria-hidden="true"></i>
+                                <span x-text="f.title"></span>
+                            </h1>
+                        </div>
+
+                        <!-- No runs yet -->
+                        <template x-if="!f.runs.length">
+                            <div class="text-center py-24">
+                                <i class="fa-solid text-4xl text-slate-300 dark:text-slate-700 mb-4" :class="f.icon" aria-hidden="true"></i>
+                                <p class="text-sm font-bold text-slate-500 dark:text-slate-400">Nothing generated yet</p>
+                                <p class="text-xs text-slate-400 dark:text-slate-600 mt-1 font-mono">Trigger this feed from the Command Center → "Run now", or wait for its scheduled run.</p>
+                            </div>
+                        </template>
+
+                        <!-- Run tabs + content -->
+                        <template x-if="f.runs.length">
+                            <div>
+                                <!-- Tab bar: one tab per run -->
+                                <div class="flex items-center gap-2 mb-6 flex-wrap border-b border-slate-100 dark:border-slate-800 pb-3">
+                                    <template x-for="(run, ri) in f.runs" :key="ri">
+                                        <button @click="activeRunIndex = ri"
+                                                :class="activeRunIndex === ri ? 'bg-indigo-500 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'"
+                                                class="whitespace-nowrap px-3 py-1.5 rounded-full text-[11px] font-bold transition-all">
+                                            <span x-text="ri === 0 ? 'Latest' : new Date(run.generated).toLocaleDateString()"></span>
+                                        </button>
+                                    </template>
+                                </div>
+
+                                <!-- Selected run -->
+                                <template x-for="(run, ri) in f.runs" :key="ri">
+                                    <div x-show="activeRunIndex === ri">
+                                        <p class="text-xs text-slate-500 dark:text-slate-500 mb-5 font-mono">
+                                            generated <span x-text="new Date(run.generated).toLocaleString()"></span>
+                                            <span x-show="run.model"> · <span x-text="run.model"></span></span>
+                                        </p>
+
+                                        <!-- Markdown -->
+                                        <template x-if="f.render_type === 'markdown'">
+                                            <article class="prose prose-slate max-w-none prose-sm md:prose-base"
+                                                     x-html="(typeof marked !== 'undefined') ? marked.parse(run.content || '') : (run.content || '')"></article>
+                                        </template>
+
+                                        <!-- Table -->
+                                        <template x-if="f.render_type === 'table'">
+                                            <div>
+                                                <template x-if="run.rows && run.rows.length">
+                                                    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-x-auto custom-scrollbar">
+                                                        <table class="w-full text-xs whitespace-nowrap">
+                                                            <thead>
+                                                                <tr class="text-left text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                                                                    <template x-for="col in (run.columns || [])" :key="col">
+                                                                        <th class="py-2.5 px-3 font-mono uppercase tracking-wider text-[9px]" x-text="col"></th>
+                                                                    </template>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <template x-for="(row, i) in run.rows" :key="i">
+                                                                    <tr class="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                                                                        <template x-for="col in (run.columns || [])" :key="col">
+                                                                            <td class="py-2 px-3 text-slate-600 dark:text-slate-300" x-text="row[col]"></td>
+                                                                        </template>
+                                                                    </tr>
+                                                                </template>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </template>
+                                                <template x-if="!(run.rows && run.rows.length)">
+                                                    <div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-xs text-amber-600 dark:text-amber-400 font-mono">
+                                                        This feed is set to <b>table</b> mode but this run wasn't a JSON array. Adjust the prompt to return a JSON array of objects.
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+    </div>
+</template>

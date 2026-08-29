@@ -1,86 +1,99 @@
+{% extends "base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login — Queue IO</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+
+{% block title %}Sign In — Queuei{% endblock %}
+{% block meta_description %}Sign in to Queuei, your self-hosted YouTube intelligence terminal.{% endblock %}
+{% block og_title %}Sign In — Queuei{% endblock %}
+
+{% block head_extra %}
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .dot-grid {
-            background-image: radial-gradient(#1e293b 1px, transparent 1px);
-            background-size: 28px 28px;
-        }
-    </style>
-</head>
-<body class="bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-4">
+{% endblock %}
 
-    <div class="w-full max-w-sm">
-        <!-- Logo -->
-        <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl shadow-indigo-500/20 mb-5">
-                <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-10 h-10 rounded-xl object-cover">
-            </div>
-            <h1 class="text-white text-2xl font-black uppercase tracking-tighter">Queue <span class="text-indigo-400">IO</span></h1>
-            <p class="text-slate-600 text-[9px] mt-1.5 uppercase tracking-[0.3em] font-mono">Restricted Access</p>
+{% block body_class %}bg-slate-950 dot-grid min-h-screen flex items-center justify-center font-sans p-4{% endblock %}
+
+{% block body %}
+<main class="w-full max-w-sm" aria-label="Sign in">
+
+    <!-- Brand -->
+    <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 shadow-2xl shadow-indigo-500/20 mb-5">
+            <img src="{% static 'favicon.png' %}" alt="Queuei" class="w-10 h-10 rounded-xl object-cover">
         </div>
-
-        <!-- Card -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-2xl">
-            <form method="post" class="space-y-5" x-data="{ showPw: false }">
-                {% csrf_token %}
-
-                <div>
-                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">Username</label>
-                    <div class="relative">
-                        <i class="fa-solid fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
-                        <input type="text" name="username" required autofocus
-                               class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600"
-                               placeholder="Enter username">
-                    </div>
-                </div>
-
-                <div>
-                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">Password</label>
-                    <div class="relative">
-                        <i class="fa-solid fa-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600 text-xs"></i>
-                        <input :type="showPw ? 'text' : 'password'" name="password" required
-                               class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg pl-10 pr-10 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600"
-                               placeholder="Enter password">
-                        <button type="button" @click="showPw = !showPw"
-                                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-indigo-400 transition-colors">
-                            <i class="fa-solid text-xs" :class="showPw ? 'fa-eye-slash' : 'fa-eye'"></i>
-                        </button>
-                    </div>
-                </div>
-
-                {% if form.errors %}
-                <div class="flex items-center gap-2 bg-red-500/8 border border-red-500/20 rounded-lg px-3 py-2">
-                    <i class="fa-solid fa-triangle-exclamation text-red-500 text-xs"></i>
-                    <p class="text-red-400 text-[10px] font-bold uppercase tracking-wide">Invalid credentials</p>
-                </div>
-                {% endif %}
-
-                <button type="submit"
-                        class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-black py-2.5 rounded-lg transition-all uppercase tracking-widest text-[11px] shadow-lg shadow-indigo-500/20 mt-2">
-                    Authenticate
-                </button>
-            </form>
-
-            <div class="mt-5 flex items-center gap-4">
-                <div class="h-px bg-slate-800 flex-1"></div>
-                <span class="text-slate-700 text-[9px] uppercase font-mono tracking-widest">or</span>
-                <div class="h-px bg-slate-800 flex-1"></div>
-            </div>
-
-            <a href="{% url 'signup' %}"
-               class="mt-4 flex items-center justify-center gap-2 w-full border border-slate-800 hover:border-slate-600 text-slate-500 hover:text-white text-[10px] font-bold uppercase tracking-widest py-2.5 rounded-lg transition-all">
-                <i class="fa-solid fa-user-plus text-[9px]"></i> Register New Account
-            </a>
-        </div>
+        <h1 class="text-white text-2xl font-black uppercase tracking-tighter">
+            Queue <span class="text-indigo-400">IO</span>
+        </h1>
+        <p class="text-slate-600 text-[9px] mt-1.5 uppercase tracking-[0.3em] font-mono">Restricted Access</p>
     </div>
 
-</body>
-</html>
+    <!-- Card -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-2xl">
+        <form method="post" class="space-y-5" x-data="{ showPw: false }" novalidate>
+            {% csrf_token %}
+
+            <div>
+                <label for="id_username"
+                       class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">
+                    Username
+                </label>
+                <div class="relative">
+                    <i class="fa-solid fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600 text-xs"
+                       aria-hidden="true"></i>
+                    <input type="text" name="username" id="id_username"
+                           required autofocus autocomplete="username"
+                           class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600"
+                           placeholder="Enter username">
+                </div>
+            </div>
+
+            <div>
+                <label for="id_password"
+                       class="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1.5 block">
+                    Password
+                </label>
+                <div class="relative">
+                    <i class="fa-solid fa-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600 text-xs"
+                       aria-hidden="true"></i>
+                    <input :type="showPw ? 'text' : 'password'" name="password" id="id_password"
+                           required autocomplete="current-password"
+                           class="w-full bg-slate-800 border border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 rounded-lg pl-10 pr-10 py-2.5 text-sm text-white outline-none transition-all placeholder:text-slate-600"
+                           placeholder="Enter password">
+                    <button type="button" @click="showPw = !showPw"
+                            :aria-label="showPw ? 'Hide password' : 'Show password'"
+                            class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-indigo-400 transition-colors">
+                        <i class="fa-solid text-xs" :class="showPw ? 'fa-eye-slash' : 'fa-eye'"
+                           aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+
+            {% if form.errors %}
+            <div role="alert"
+                 class="flex items-center gap-2 bg-red-500/8 border border-red-500/20 rounded-lg px-3 py-2">
+                <i class="fa-solid fa-triangle-exclamation text-red-500 text-xs" aria-hidden="true"></i>
+                <p class="text-red-400 text-[10px] font-bold uppercase tracking-wide">
+                    Invalid credentials — please try again.
+                </p>
+            </div>
+            {% endif %}
+
+            <button type="submit"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white font-black py-2.5 rounded-lg transition-all uppercase tracking-widest text-[11px] shadow-lg shadow-indigo-500/20 mt-2">
+                Authenticate
+            </button>
+        </form>
+
+        <div class="mt-5 flex items-center gap-4" aria-hidden="true">
+            <div class="h-px bg-slate-800 flex-1"></div>
+            <span class="text-slate-700 text-[9px] uppercase font-mono tracking-widest">or</span>
+            <div class="h-px bg-slate-800 flex-1"></div>
+        </div>
+
+        <a href="{% url 'signup' %}"
+           class="mt-4 flex items-center justify-center gap-2 w-full border border-slate-800 hover:border-slate-600 text-slate-500 hover:text-white text-[10px] font-bold uppercase tracking-widest py-2.5 rounded-lg transition-all">
+            <i class="fa-solid fa-user-plus text-[9px]" aria-hidden="true"></i>
+            Register New Account
+        </a>
+    </div>
+
+</main>
+{% endblock %}
