@@ -13,7 +13,7 @@ from bson import ObjectId
 from django.utils.timezone import now as tz_now
 
 import threading
-from tasks.models import TaskConfiguration, GlobalSetting, CronJob
+from tasks.models import TaskConfiguration, GlobalSetting, CronJob, DashboardFeed
 from django.contrib.auth.decorators import user_passes_test
 
 # ── Intel Chat rate limiting (per-user, in-memory) ────────────────────────────
@@ -726,6 +726,57 @@ def get_nexus_graph(request):
                 })
 
     return JsonResponse({"nodes": nodes, "links": links})
+
+
+@login_required
+def docs_view(request):
+    """Project documentation portal (OpenMetadata-style).
+
+    Renders a static reference (architecture, endpoints, models, env vars) plus a
+    *live* snapshot of this instance's metadata — the actual TaskConfigurations,
+    DashboardFeeds, CronJobs and GlobalSettings currently in PostgreSQL. DB reads
+    are guarded so the page still renders during initial migrations.
+    """
+    def _safe(fn, default):
+        try:
+            return fn()
+        except Exception:
+            return default
+
+    tasks = _safe(lambda: [
+        {'task_key': t.task_key, 'display_name': t.display_name,
+         'target_collection': t.target_collection, 'is_active': t.is_active}
+        for t in TaskConfiguration.objects.all().order_by('task_key')
+    ], [])
+
+    feeds = _safe(lambda: [
+        {'key': f.key, 'title': f.title, 'icon': f.icon,
+         'render_type': f.render_type, 'ai_model': f.ai_model or '(global)',
+         'is_active': f.is_active}
+        for f in DashboardFeed.objects.all().order_by('title')
+    ], [])
+
+    crons = _safe(lambda: [
+        {'name': c.name, 'job_type': c.job_type, 'task_key': c.task_key,
+         'endpoint_url': c.endpoint_url, 'cron_expression': c.cron_expression,
+         'is_active': c.is_active,
+         'last_run_at': c.last_run_at.strftime('%Y-%m-%d %H:%M UTC') if c.last_run_at else None}
+        for c in CronJob.objects.all().order_by('name')
+    ], [])
+
+    settings_snapshot = _safe(lambda: [
+        {'key': s.key, 'description': s.description, 'is_known': s.key in KNOWN_KEYS}
+        for s in GlobalSetting.objects.all().order_by('key')
+    ], [])
+
+    metadata = {
+        'tasks': tasks,
+        'feeds': feeds,
+        'crons': crons,
+        'settings': settings_snapshot,
+        'is_superuser': request.user.is_superuser,
+    }
+    return render(request, 'docs.html', {'metadata_json': metadata})
 
 
 @login_required

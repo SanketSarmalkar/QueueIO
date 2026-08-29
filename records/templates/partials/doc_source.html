@@ -1,0 +1,7 @@
+<div class="flex items-start gap-3 bg-slate-900 border {% if tone == 'emerald' %}border-emerald-500/30{% else %}border-slate-800{% endif %} rounded-xl p-3.5">
+    <span class="shrink-0 w-6 h-6 rounded-full {% if tone == 'emerald' %}bg-emerald-500/15 text-emerald-300{% else %}bg-slate-800 text-slate-400{% endif %} text-[11px] font-black flex items-center justify-center mt-0.5">{{ n }}</span>
+    <div>
+        <p class="{% if tone == 'emerald' %}text-emerald-300{% else %}text-white{% endif %} font-mono text-sm font-bold">{{ name }}</p>
+        <p class="text-slate-400 text-xs mt-0.5">{{ note }}</p>
+    </div>
+</div>
